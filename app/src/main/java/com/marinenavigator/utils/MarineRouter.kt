@@ -8,6 +8,7 @@ import timber.log.Timber
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import kotlin.math.abs
 import kotlin.math.sqrt
 
 /**
@@ -21,9 +22,11 @@ import kotlin.math.sqrt
  */
 object MarineRouter {
 
-    private const val GRID_N    = 100    // resolución cuadrícula 100×100
-    private const val PADDING   = 0.15   // grados de margen
-    private const val HAZARD_BUFFER = 2  // celdas de seguridad alrededor de cada peligro puntual
+    private const val GRID_N        = 200   // resolución cuadrícula 200×200
+    private const val PADDING       = 0.15  // grados de margen
+    private const val HAZARD_BUFFER = 2     // celdas de seguridad alrededor de cada peligro puntual
+    private const val COAST_BUFFER  = 1     // celdas de buffer alrededor de los propios segmentos de costa
+    private const val RDP_EPSILON   = 0.0008 // umbral de simplificación Ramer-Douglas-Peucker (~80 m)
 
     data class LatLon(val lat: Double, val lon: Double)
     data class Cell(val row: Int, val col: Int)
@@ -175,26 +178,66 @@ object MarineRouter {
         val lonStep = (east - west)  / GRID_N
         val grid = Array(GRID_N) { BooleanArray(GRID_N) }
 
-        // 1. Marcar TIERRA con ray casting sobre líneas de costa
+        // 1. Marcar TIERRA con algoritmo Winding Number sobre segmentos de costa OSM.
+        //    Convención OSM: el MAR está a la DERECHA de la dirección de viaje → la tierra
+        //    queda a la izquierda → los polígonos de tierra son CCW.
+        //    Winding Number != 0 ⟹ el punto está en tierra.
+        //
+        //    Para cada segmento (p1→p2) emitido hacia el este (+lon) desde el punto:
+        //      · cruce ascendente (p1.lat ≤ lat < p2.lat) y punto a la IZQUIERDA del seg. → wn++
+        //      · cruce descendente (p2.lat ≤ lat < p1.lat) y punto a la DERECHA del seg. → wn--
+        //    "isLeft = (p2.lon-p1.lon)*(lat-p1.lat) - (lon-p1.lon)*(p2.lat-p1.lat)"
+        //      > 0 ⟹ punto a la izquierda; < 0 ⟹ punto a la derecha
         for (row in 0 until GRID_N) {
             val lat = south + (row + 0.5) * latStep
             for (col in 0 until GRID_N) {
                 val lon = west + (col + 0.5) * lonStep
-                var crossings = 0
+                var wn = 0
                 for ((p1, p2) in coastSegments) {
-                    val minLat = minOf(p1.lat, p2.lat)
-                    val maxLat = maxOf(p1.lat, p2.lat)
-                    if (lat < minLat || lat >= maxLat) continue
-                    val t    = (lat - p1.lat) / (p2.lat - p1.lat)
-                    val iLon = p1.lon + t * (p2.lon - p1.lon)
-                    if (iLon <= lon) crossings++
+                    if (p1.lat <= lat) {
+                        if (p2.lat > lat) {
+                            // cruce ascendente
+                            val cross = (p2.lon - p1.lon) * (lat - p1.lat) -
+                                        (lon    - p1.lon) * (p2.lat - p1.lat)
+                            if (cross > 0) wn++
+                        }
+                    } else {
+                        if (p2.lat <= lat) {
+                            // cruce descendente
+                            val cross = (p2.lon - p1.lon) * (lat - p1.lat) -
+                                        (lon    - p1.lon) * (p2.lat - p1.lat)
+                            if (cross < 0) wn--
+                        }
+                    }
                 }
-                if (crossings % 2 == 1) grid[row][col] = true
+                if (wn != 0) grid[row][col] = true
             }
         }
 
-        // 2. Marcar ÁREAS DE PELIGRO (arrecifes/bajos como polígono)
-        //    Misma técnica ray casting
+        // 2. Rasterizar los propios segmentos de costa y añadir un buffer de seguridad
+        //    (asegura que las celdas por las que pasa la línea de costa queden bloqueadas
+        //    incluso cuando el winding number falla por polígonos incompletos en la bbox)
+        for ((p1, p2) in coastSegments) {
+            val r1 = ((p1.lat - south) / latStep).toInt().coerceIn(0, GRID_N - 1)
+            val c1 = ((p1.lon - west)  / lonStep).toInt().coerceIn(0, GRID_N - 1)
+            val r2 = ((p2.lat - south) / latStep).toInt().coerceIn(0, GRID_N - 1)
+            val c2 = ((p2.lon - west)  / lonStep).toInt().coerceIn(0, GRID_N - 1)
+            val steps = maxOf(abs(r2 - r1), abs(c2 - c1)) * 2 + 1
+            for (s in 0..steps) {
+                val t = s.toDouble() / steps
+                val r = (r1 + t * (r2 - r1)).toInt().coerceIn(0, GRID_N - 1)
+                val c = (c1 + t * (c2 - c1)).toInt().coerceIn(0, GRID_N - 1)
+                for (dr in -COAST_BUFFER..COAST_BUFFER) {
+                    for (dc in -COAST_BUFFER..COAST_BUFFER) {
+                        val nr = r + dr; val nc = c + dc
+                        if (nr in 0 until GRID_N && nc in 0 until GRID_N) grid[nr][nc] = true
+                    }
+                }
+            }
+        }
+
+        // 3. Marcar ÁREAS DE PELIGRO (arrecifes/bajos como polígono) con ray casting eastward.
+        //    Ray hacia el ESTE (+lon): conta cruces donde iLon > lon (a la derecha del punto).
         for (areaSegs in hazardAreas) {
             for (row in 0 until GRID_N) {
                 val lat = south + (row + 0.5) * latStep
@@ -208,25 +251,22 @@ object MarineRouter {
                         if (lat < minLat || lat >= maxLat) continue
                         val t    = (lat - p1.lat) / (p2.lat - p1.lat)
                         val iLon = p1.lon + t * (p2.lon - p1.lon)
-                        if (iLon <= lon) crossings++
+                        if (iLon > lon) crossings++   // ray eastward: contar cruces a la derecha
                     }
                     if (crossings % 2 == 1) grid[row][col] = true
                 }
             }
         }
 
-        // 3. Marcar PELIGROS PUNTUALES (rocas, wreck, etc.) con buffer de seguridad
+        // 4. Marcar PELIGROS PUNTUALES (rocas, wreck, etc.) con buffer de seguridad
         for (pt in hazardPoints) {
             val centerRow = ((pt.lat - south) / latStep).toInt().coerceIn(0, GRID_N - 1)
             val centerCol = ((pt.lon - west)  / lonStep).toInt().coerceIn(0, GRID_N - 1)
-            // Marcar un radio de HAZARD_BUFFER celdas alrededor
             for (dr in -HAZARD_BUFFER..HAZARD_BUFFER) {
                 for (dc in -HAZARD_BUFFER..HAZARD_BUFFER) {
                     val r = centerRow + dr
                     val c = centerCol + dc
-                    if (r in 0 until GRID_N && c in 0 until GRID_N) {
-                        grid[r][c] = true
-                    }
+                    if (r in 0 until GRID_N && c in 0 until GRID_N) grid[r][c] = true
                 }
             }
         }
@@ -330,13 +370,48 @@ object MarineRouter {
     }
 
     // ─────────────────────────────────────────────────────────
-    // Simplificar ruta (reducir puntos redundantes)
+    // Simplificar ruta con Ramer-Douglas-Peucker
+    // Mantiene los puntos necesarios para no cruzar tierra
     // ─────────────────────────────────────────────────────────
     private fun simplify(path: List<GeoPoint>): List<GeoPoint> {
         if (path.size <= 2) return path
-        val result = mutableListOf(path.first())
-        for (i in 2 until path.size step 3) result.add(path[i])
-        if (result.last() != path.last()) result.add(path.last())
-        return result
+        return rdp(path, 0, path.size - 1, RDP_EPSILON)
+    }
+
+    private fun rdp(path: List<GeoPoint>, start: Int, end: Int, epsilon: Double): List<GeoPoint> {
+        if (end - start < 2) return listOf(path[start], path[end])
+
+        val p1 = path[start]
+        val p2 = path[end]
+        val dx = p2.longitude - p1.longitude
+        val dy = p2.latitude  - p1.latitude
+        val lenSq = dx * dx + dy * dy
+
+        var maxDist = 0.0
+        var maxIdx  = start + 1
+
+        for (i in start + 1 until end) {
+            val p  = path[i]
+            val dist = if (lenSq < 1e-14) {
+                val ex = p.longitude - p1.longitude
+                val ey = p.latitude  - p1.latitude
+                sqrt(ex * ex + ey * ey)
+            } else {
+                val t  = ((p.longitude - p1.longitude) * dx + (p.latitude - p1.latitude) * dy) / lenSq
+                val tc = t.coerceIn(0.0, 1.0)
+                val ex = p.longitude - (p1.longitude + tc * dx)
+                val ey = p.latitude  - (p1.latitude  + tc * dy)
+                sqrt(ex * ex + ey * ey)
+            }
+            if (dist > maxDist) { maxDist = dist; maxIdx = i }
+        }
+
+        return if (maxDist > epsilon) {
+            val left  = rdp(path, start,   maxIdx, epsilon)
+            val right = rdp(path, maxIdx,  end,    epsilon)
+            left.dropLast(1) + right
+        } else {
+            listOf(path[start], path[end])
+        }
     }
 }
