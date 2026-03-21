@@ -11,17 +11,13 @@ import com.marinenavigator.data.models.*
 import com.marinenavigator.services.AnchorAlarmService
 import com.marinenavigator.services.NavigationService
 import com.marinenavigator.utils.NavigationUtils
-import kotlinx.coroutines.Dispatchers
+import com.marinenavigator.utils.MarineRouter
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import org.json.JSONObject
 import org.osmdroid.util.GeoPoint
 import timber.log.Timber
-import java.net.HttpURLConnection
-import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -54,9 +50,13 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
     private val _anchorAlarmConfig = MutableLiveData<AnchorAlarmConfig>()
     val anchorAlarmConfig: LiveData<AnchorAlarmConfig> = _anchorAlarmConfig
 
-    // Ruta marina calculada (Brouter)
+    // Ruta marina calculada
     private val _marineRoutePoints = MutableLiveData<List<GeoPoint>>(emptyList())
     val marineRoutePoints: LiveData<List<GeoPoint>> = _marineRoutePoints
+
+    // Punto de origen elegido manualmente (null = usar GPS actual)
+    private val _originPoint = MutableLiveData<GeoPoint?>(null)
+    val originPoint: LiveData<GeoPoint?> = _originPoint
 
     // Puntos del track activo (en memoria para mostrar en el mapa)
     private val _currentTrackPoints = MutableLiveData<List<TrackPoint>>(emptyList())
@@ -259,74 +259,43 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ─────────────────────────────────────────────────────────
-    // ROUTING MARINO — Brouter (evita tierra y zonas de poco fondo)
+    // PUNTO DE ORIGEN MANUAL
     // ─────────────────────────────────────────────────────────
-    fun calculateMarineRoute(fromLat: Double, fromLon: Double, toLat: Double, toLon: Double) {
+    fun setOriginPoint(lat: Double, lon: Double) {
+        _originPoint.value = GeoPoint(lat, lon)
+    }
+
+    fun clearOriginPoint() {
+        _originPoint.value = null
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // ROUTING MARINO — A* con datos de costa de Overpass
+    // ─────────────────────────────────────────────────────────
+    fun calculateMarineRoute(toLat: Double, toLon: Double) {
         viewModelScope.launch {
+            // Usar origen manual o GPS actual
+            val origin = _originPoint.value
+            val gps = gpsData.value
+            val fromLat: Double
+            val fromLon: Double
+            when {
+                origin != null -> { fromLat = origin.latitude; fromLon = origin.longitude }
+                gps.isValid    -> { fromLat = gps.latitude;    fromLon = gps.longitude }
+                else           -> { Timber.w("Sin posición de origen"); return@launch }
+            }
+
             try {
-                val points = withContext(Dispatchers.IO) {
-                    fetchBrouterRoute(fromLat, fromLon, toLat, toLon)
-                }
-                if (points.isNotEmpty()) {
-                    _marineRoutePoints.postValue(points)
-                    Timber.d("Ruta marina: ${points.size} puntos calculados")
-                } else {
-                    // Fallback: línea recta (el Fragment la dibujará punteada)
-                    _marineRoutePoints.postValue(listOf(
-                        GeoPoint(fromLat, fromLon),
-                        GeoPoint(toLat, toLon)
-                    ))
-                    Timber.w("Brouter sin resultado, usando línea recta")
-                }
+                Timber.d("Calculando ruta marina: ($fromLat,$fromLon) → ($toLat,$toLon)")
+                val points = MarineRouter.route(fromLat, fromLon, toLat, toLon)
+                _marineRoutePoints.postValue(points)
+                Timber.d("Ruta marina: ${points.size} puntos")
             } catch (e: Exception) {
-                Timber.e(e, "Error calculando ruta marina")
+                Timber.e(e, "Error en ruta marina")
                 _marineRoutePoints.postValue(listOf(
-                    GeoPoint(fromLat, fromLon),
-                    GeoPoint(toLat, toLon)
+                    GeoPoint(fromLat, fromLon), GeoPoint(toLat, toLon)
                 ))
             }
         }
-    }
-
-    private fun fetchBrouterRoute(
-        fromLat: Double, fromLon: Double,
-        toLat: Double, toLon: Double
-    ): List<GeoPoint> {
-        // Brouter — perfil "boat" evita tierra y zonas de navegación peligrosa
-        val urlStr = "https://brouter.de/brouter" +
-            "?lonlats=$fromLon,$fromLat|$toLon,$toLat" +
-            "&profile=boat" +
-            "&alternativeidx=0" +
-            "&format=geojson"
-
-        val conn = URL(urlStr).openConnection() as HttpURLConnection
-        conn.connectTimeout = 15_000
-        conn.readTimeout = 20_000
-        conn.setRequestProperty("User-Agent", "MarineNavigator/1.0")
-
-        return try {
-            val response = conn.inputStream.bufferedReader().readText()
-            parseGeoJsonRoute(response)
-        } finally {
-            conn.disconnect()
-        }
-    }
-
-    private fun parseGeoJsonRoute(geojson: String): List<GeoPoint> {
-        val points = mutableListOf<GeoPoint>()
-        val root = JSONObject(geojson)
-        val features = root.getJSONArray("features")
-        for (i in 0 until features.length()) {
-            val geometry = features.getJSONObject(i).getJSONObject("geometry")
-            if (geometry.getString("type") == "LineString") {
-                val coords = geometry.getJSONArray("coordinates")
-                for (j in 0 until coords.length()) {
-                    val coord = coords.getJSONArray(j)
-                    // GeoJSON: [lon, lat, alt?]
-                    points.add(GeoPoint(coord.getDouble(1), coord.getDouble(0)))
-                }
-            }
-        }
-        return points
     }
 }

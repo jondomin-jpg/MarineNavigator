@@ -46,6 +46,7 @@ class MapFragment : Fragment() {
     private lateinit var locationOverlay: MyLocationNewOverlay
     private var routeOverlay: Polyline? = null
     private var destinationMarker: Marker? = null
+    private var originMarker: Marker? = null
     private var anchorCircle: Polygon? = null
     private val fishingMarkers = mutableListOf<Marker>()
     private val waypointMarkers = mutableListOf<Marker>()
@@ -104,18 +105,8 @@ class MapFragment : Fragment() {
         mapView.setMultiTouchControls(true)
         mapView.controller.setZoom(14.0)
 
-        // Base: ESRI Ocean Basemap — mapa náutico con batimetría y profundidades
-        val esriOceanSource = object : OnlineTileSourceBase(
-            "ESRIOcean", 2, 18, 256, ".jpg",
-            arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/")
-        ) {
-            override fun getTileURLString(pMapTileIndex: Long): String =
-                baseUrl +
-                    MapTileIndex.getZoom(pMapTileIndex) + "/" +
-                    MapTileIndex.getY(pMapTileIndex) + "/" +  // ESRI usa z/y/x
-                    MapTileIndex.getX(pMapTileIndex)
-        }
-        mapView.setTileSource(esriOceanSource)
+        // Base: OpenStreetMap (fiable, sin API key)
+        mapView.setTileSource(TileSourceFactory.MAPNIK)
 
         // Overlay de rotación de mapa
         val rotationOverlay = RotationGestureOverlay(mapView)
@@ -200,6 +191,7 @@ class MapFragment : Fragment() {
     private fun showLongPressMenu(point: GeoPoint) {
         val options = arrayOf(
             "Navegar aquí",
+            "Establecer como origen de ruta",
             "Guardar como waypoint",
             "Guardar punto de pesca",
             "Establecer fondeo aquí"
@@ -209,9 +201,22 @@ class MapFragment : Fragment() {
             .setItems(options) { _, which ->
                 when (which) {
                     0 -> showNavigateToDialog(point)
-                    1 -> showSaveWaypointDialog(point)
-                    2 -> showSaveFishingPointDialog(point)
-                    3 -> showAnchorAlarmDialog(point)
+                    1 -> {
+                        viewModel.setOriginPoint(point.latitude, point.longitude)
+                        originMarker?.let { mapView.overlays.remove(it) }
+                        originMarker = Marker(mapView).apply {
+                            position = point
+                            title = "Origen"
+                            snippet = "Punto de partida de la ruta"
+                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                        }
+                        mapView.overlays.add(originMarker!!)
+                        mapView.invalidate()
+                        Toast.makeText(context, "Origen establecido", Toast.LENGTH_SHORT).show()
+                    }
+                    2 -> showSaveWaypointDialog(point)
+                    3 -> showSaveFishingPointDialog(point)
+                    4 -> showAnchorAlarmDialog(point)
                 }
             }
             .show()
@@ -230,12 +235,9 @@ class MapFragment : Fragment() {
                 val wp = Waypoint(name = name, latitude = point.latitude, longitude = point.longitude)
                 viewModel.startNavigationTo(wp)
                 setDestinationMarker(point, name)
-                // Calcular ruta marina evitando tierra y zonas de poco fondo
+                // Calcular ruta marina evitando tierra
                 Toast.makeText(context, "Calculando ruta marina...", Toast.LENGTH_SHORT).show()
-                val gps = viewModel.gpsData.value
-                if (gps.isValid) {
-                    viewModel.calculateMarineRoute(gps.latitude, gps.longitude, point.latitude, point.longitude)
-                }
+                viewModel.calculateMarineRoute(point.latitude, point.longitude)
             }
             .setNegativeButton("Cancelar", null)
             .show()
@@ -366,31 +368,29 @@ class MapFragment : Fragment() {
 
     private fun showLayersMenu() {
         val options = arrayOf(
-            "Carta náutica (ESRI Ocean) ⚓",
-            "OpenStreetMap estándar",
-            "Satélite"
+            "OpenStreetMap + Cartas náuticas ⚓",
+            "Satélite + Cartas náuticas"
         )
         MaterialAlertDialogBuilder(requireContext())
             .setTitle("Capa base del mapa")
             .setItems(options) { _, which ->
+                // Limpiar overlays actuales excepto los de marcadores
+                mapView.overlays.clear()
+                // Añadir rotación
+                val rot = org.osmdroid.views.overlay.gestures.RotationGestureOverlay(mapView)
+                rot.isEnabled = true
+                mapView.overlays.add(rot)
+
                 when (which) {
-                    0 -> {
-                        val esriOcean = object : OnlineTileSourceBase(
-                            "ESRIOcean", 2, 18, 256, ".jpg",
-                            arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/")
-                        ) {
-                            override fun getTileURLString(pMapTileIndex: Long): String =
-                                baseUrl + MapTileIndex.getZoom(pMapTileIndex) + "/" +
-                                    MapTileIndex.getY(pMapTileIndex) + "/" + MapTileIndex.getX(pMapTileIndex)
-                        }
-                        mapView.setTileSource(esriOcean)
-                    }
-                    1 -> mapView.setTileSource(TileSourceFactory.MAPNIK)
-                    2 -> mapView.setTileSource(
+                    0 -> mapView.setTileSource(TileSourceFactory.MAPNIK)
+                    1 -> mapView.setTileSource(
                         XYTileSource("Satellite", 2, 20, 256, ".jpg",
-                            arrayOf("https://mt0.google.com/vt/lyrs=s&hl=en&x="))
+                            arrayOf("https://mt0.google.com/vt/lyrs=s&hl=en&"))
                     )
                 }
+                // Volver a añadir capas náuticas y de posición
+                addNauticalChartOverlay()
+                mapView.overlays.add(locationOverlay)
                 mapView.invalidate()
             }
             .show()
