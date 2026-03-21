@@ -38,6 +38,8 @@ jobs:
 
       - name: Compilar APK debug
         run: ./gradlew assembleDebug --no-daemon --stacktrace
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.daemon=false"
 
       - name: Subir APK como artefacto
         uses: actions/upload-artifact@v4
