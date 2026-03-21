@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item
+        android:id="@+id/mapFragment"
+        android:icon="@drawable/ic_map"
+        android:title="@string/nav_map" />
+
+    <item
+        android:id="@+id/routesFragment"
+        android:icon="@drawable/ic_route"
+        android:title="@string/nav_routes" />
+
+    <item
+        android:id="@+id/fishingFragment"
+        android:icon="@drawable/ic_fishing"
+        android:title="@string/nav_fishing" />
+
+    <item
+        android:id="@+id/waypointsFragment"
+        android:icon="@drawable/ic_waypoint"
+        android:title="@string/nav_waypoints" />
+
+</menu>

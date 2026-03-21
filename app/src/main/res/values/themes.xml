@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.MarineNavigator" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryVariant">@color/navy_dark</item>
+        <item name="colorOnPrimary">@color/navy_dark</item>
+        <item name="colorSecondary">@color/green_active</item>
+        <item name="colorSecondaryVariant">@color/navy_medium</item>
+        <item name="colorOnSecondary">@color/navy_dark</item>
+        <item name="android:colorBackground">@color/navy_dark</item>
+        <item name="colorSurface">@color/navy_medium</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="android:statusBarColor">@color/navy_dark</item>
+        <item name="android:navigationBarColor">@color/navy_dark</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="materialAlertDialogTheme">@style/MarineDialogTheme</item>
+    </style>
+
+    <style name="MarineDialogTheme" parent="ThemeOverlay.MaterialComponents.MaterialAlertDialog">
+        <item name="colorSurface">@color/navy_medium</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorPrimary">@color/cyan_bright</item>
+    </style>
+</resources>

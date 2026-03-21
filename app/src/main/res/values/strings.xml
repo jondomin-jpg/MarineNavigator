@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MarineNavigator</string>
+    <string name="nav_map">Mapa</string>
+    <string name="nav_routes">Rutas</string>
+    <string name="nav_fishing">Pesca</string>
+    <string name="nav_waypoints">Waypoints</string>
+</resources>

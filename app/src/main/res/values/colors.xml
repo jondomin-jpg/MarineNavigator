@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Paleta marina oscura -->
+    <color name="navy_dark">#0A1628</color>
+    <color name="navy_medium">#0D2137</color>
+    <color name="navy_light">#1A3A5C</color>
+    <color name="cyan_bright">#00CFFF</color>
+    <color name="green_active">#00FF88</color>
+    <color name="amber">#FFCC00</color>
+    <color name="red_alert">#FF3333</color>
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#88AABB</color>
+
+    <!-- Material Theme -->
+    <color name="colorPrimary">#00CFFF</color>
+    <color name="colorPrimaryDark">#0A1628</color>
+    <color name="colorAccent">#00FF88</color>
+    <color name="colorSurface">#0D2137</color>
+    <color name="colorBackground">#0A1628</color>
+    <color name="colorOnSurface">#FFFFFF</color>
+    <color name="colorOnBackground">#FFFFFF</color>
+</resources>
