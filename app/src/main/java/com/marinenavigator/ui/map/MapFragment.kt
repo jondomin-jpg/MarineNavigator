@@ -148,23 +148,34 @@ class MapFragment : Fragment() {
     }
 
     private fun addNauticalChartOverlay() {
-        // Capa 1: ESRI Ocean Reference (nombres de lugares marítimos, límites)
-        val esriOceanRefSource = object : OnlineTileSourceBase(
-            "ESRIOceanRef", 2, 18, 256, ".png",
-            arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/")
+        // Capa 1: IHM — Cartas náuticas ENC oficiales (Instituto Hidrográfico de la Marina)
+        // WMS: http://ideihm.covam.es/wms/cartaENCp5
+        val ihmWmsSource = object : OnlineTileSourceBase(
+            "IHM_ENC", 3, 18, 256, ".png",
+            arrayOf("http://ideihm.covam.es/wms/cartaENCp5")
         ) {
-            override fun getTileURLString(pMapTileIndex: Long): String =
-                baseUrl +
-                    MapTileIndex.getZoom(pMapTileIndex) + "/" +
-                    MapTileIndex.getY(pMapTileIndex) + "/" +
-                    MapTileIndex.getX(pMapTileIndex)
+            override fun getTileURLString(pMapTileIndex: Long): String {
+                val z = MapTileIndex.getZoom(pMapTileIndex).toInt()
+                val x = MapTileIndex.getX(pMapTileIndex)
+                val y = MapTileIndex.getY(pMapTileIndex)
+                val n = Math.pow(2.0, z.toDouble())
+                val minLon = x / n * 360.0 - 180.0
+                val maxLon = (x + 1) / n * 360.0 - 180.0
+                val maxLat = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))))
+                val minLat = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 1) / n))))
+                val bbox = "$minLon,$minLat,$maxLon,$maxLat"
+                return "$baseUrl?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap" +
+                    "&LAYERS=0&STYLES=&SRS=EPSG:4326" +
+                    "&BBOX=$bbox&WIDTH=256&HEIGHT=256" +
+                    "&FORMAT=image/png&TRANSPARENT=TRUE"
+            }
         }
-        val refOverlay = TilesOverlay(
-            org.osmdroid.tileprovider.MapTileProviderBasic(context, esriOceanRefSource), context
+        val ihmOverlay = TilesOverlay(
+            org.osmdroid.tileprovider.MapTileProviderBasic(context, ihmWmsSource), context
         )
-        refOverlay.loadingBackgroundColor = Color.TRANSPARENT
-        refOverlay.loadingLineColor = Color.TRANSPARENT
-        mapView.overlays.add(refOverlay)
+        ihmOverlay.loadingBackgroundColor = Color.TRANSPARENT
+        ihmOverlay.loadingLineColor = Color.TRANSPARENT
+        mapView.overlays.add(ihmOverlay)
 
         // Capa 2: OpenSeaMap — marcas de navegación (boyas, luces, puertos, peligros)
         val openSeaMapSource = object : OnlineTileSourceBase(
@@ -368,8 +379,8 @@ class MapFragment : Fragment() {
 
     private fun showLayersMenu() {
         val options = arrayOf(
-            "OpenStreetMap + Cartas náuticas ⚓",
-            "Satélite + Cartas náuticas"
+            "OpenStreetMap + Cartas IHM ⚓",
+            "Satélite + Cartas IHM ⚓"
         )
         MaterialAlertDialogBuilder(requireContext())
             .setTitle("Capa base del mapa")

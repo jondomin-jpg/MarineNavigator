@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Permitir HTTP para el WMS de cartas náuticas del IHM (no ofrece HTTPS) -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">ideihm.covam.es</domain>
+    </domain-config>
+</network-security-config>
