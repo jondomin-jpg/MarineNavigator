@@ -11,10 +11,17 @@ import com.marinenavigator.data.models.*
 import com.marinenavigator.services.AnchorAlarmService
 import com.marinenavigator.services.NavigationService
 import com.marinenavigator.utils.NavigationUtils
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import org.osmdroid.util.GeoPoint
+import timber.log.Timber
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -46,6 +53,10 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
     // Alerta de fondeo
     private val _anchorAlarmConfig = MutableLiveData<AnchorAlarmConfig>()
     val anchorAlarmConfig: LiveData<AnchorAlarmConfig> = _anchorAlarmConfig
+
+    // Ruta marina calculada (Brouter)
+    private val _marineRoutePoints = MutableLiveData<List<GeoPoint>>(emptyList())
+    val marineRoutePoints: LiveData<List<GeoPoint>> = _marineRoutePoints
 
     // Puntos del track activo (en memoria para mostrar en el mapa)
     private val _currentTrackPoints = MutableLiveData<List<TrackPoint>>(emptyList())
@@ -245,5 +256,77 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
         context.startService(Intent(context, AnchorAlarmService::class.java).apply {
             action = AnchorAlarmService.ACTION_STOP_ALARM
         })
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // ROUTING MARINO — Brouter (evita tierra y zonas de poco fondo)
+    // ─────────────────────────────────────────────────────────
+    fun calculateMarineRoute(fromLat: Double, fromLon: Double, toLat: Double, toLon: Double) {
+        viewModelScope.launch {
+            try {
+                val points = withContext(Dispatchers.IO) {
+                    fetchBrouterRoute(fromLat, fromLon, toLat, toLon)
+                }
+                if (points.isNotEmpty()) {
+                    _marineRoutePoints.postValue(points)
+                    Timber.d("Ruta marina: ${points.size} puntos calculados")
+                } else {
+                    // Fallback: línea recta (el Fragment la dibujará punteada)
+                    _marineRoutePoints.postValue(listOf(
+                        GeoPoint(fromLat, fromLon),
+                        GeoPoint(toLat, toLon)
+                    ))
+                    Timber.w("Brouter sin resultado, usando línea recta")
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Error calculando ruta marina")
+                _marineRoutePoints.postValue(listOf(
+                    GeoPoint(fromLat, fromLon),
+                    GeoPoint(toLat, toLon)
+                ))
+            }
+        }
+    }
+
+    private fun fetchBrouterRoute(
+        fromLat: Double, fromLon: Double,
+        toLat: Double, toLon: Double
+    ): List<GeoPoint> {
+        // Brouter — perfil "boat" evita tierra y zonas de navegación peligrosa
+        val urlStr = "https://brouter.de/brouter" +
+            "?lonlats=$fromLon,$fromLat|$toLon,$toLat" +
+            "&profile=boat" +
+            "&alternativeidx=0" +
+            "&format=geojson"
+
+        val conn = URL(urlStr).openConnection() as HttpURLConnection
+        conn.connectTimeout = 15_000
+        conn.readTimeout = 20_000
+        conn.setRequestProperty("User-Agent", "MarineNavigator/1.0")
+
+        return try {
+            val response = conn.inputStream.bufferedReader().readText()
+            parseGeoJsonRoute(response)
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    private fun parseGeoJsonRoute(geojson: String): List<GeoPoint> {
+        val points = mutableListOf<GeoPoint>()
+        val root = JSONObject(geojson)
+        val features = root.getJSONArray("features")
+        for (i in 0 until features.length()) {
+            val geometry = features.getJSONObject(i).getJSONObject("geometry")
+            if (geometry.getString("type") == "LineString") {
+                val coords = geometry.getJSONArray("coordinates")
+                for (j in 0 until coords.length()) {
+                    val coord = coords.getJSONArray(j)
+                    // GeoJSON: [lon, lat, alt?]
+                    points.add(GeoPoint(coord.getDouble(1), coord.getDouble(0)))
+                }
+            }
+        }
+        return points
     }
 }

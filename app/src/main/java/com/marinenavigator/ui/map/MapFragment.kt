@@ -101,16 +101,28 @@ class MapFragment : Fragment() {
     // ─────────────────────────────────────────────────────────
     private fun initializeMap() {
         mapView = binding.mapView
-        mapView.setTileSource(TileSourceFactory.MAPNIK)  // Base: OpenStreetMap
         mapView.setMultiTouchControls(true)
         mapView.controller.setZoom(14.0)
+
+        // Base: ESRI Ocean Basemap — mapa náutico con batimetría y profundidades
+        val esriOceanSource = object : OnlineTileSourceBase(
+            "ESRIOcean", 2, 18, 256, ".jpg",
+            arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/")
+        ) {
+            override fun getTileURLString(pMapTileIndex: Long): String =
+                baseUrl +
+                    MapTileIndex.getZoom(pMapTileIndex) + "/" +
+                    MapTileIndex.getY(pMapTileIndex) + "/" +  // ESRI usa z/y/x
+                    MapTileIndex.getX(pMapTileIndex)
+        }
+        mapView.setTileSource(esriOceanSource)
 
         // Overlay de rotación de mapa
         val rotationOverlay = RotationGestureOverlay(mapView)
         rotationOverlay.isEnabled = true
         mapView.overlays.add(rotationOverlay)
 
-        // Overlay de cartas náuticas OpenSeaMap
+        // Overlay de marcas náuticas OpenSeaMap (boyas, luces, puertos)
         addNauticalChartOverlay()
 
         // Overlay de posición
@@ -145,26 +157,41 @@ class MapFragment : Fragment() {
     }
 
     private fun addNauticalChartOverlay() {
-        // OpenSeaMap - cartas náuticas con profundidades, marcas, etc.
+        // Capa 1: ESRI Ocean Reference (nombres de lugares marítimos, límites)
+        val esriOceanRefSource = object : OnlineTileSourceBase(
+            "ESRIOceanRef", 2, 18, 256, ".png",
+            arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/")
+        ) {
+            override fun getTileURLString(pMapTileIndex: Long): String =
+                baseUrl +
+                    MapTileIndex.getZoom(pMapTileIndex) + "/" +
+                    MapTileIndex.getY(pMapTileIndex) + "/" +
+                    MapTileIndex.getX(pMapTileIndex)
+        }
+        val refOverlay = TilesOverlay(
+            org.osmdroid.tileprovider.MapTileProviderBasic(context, esriOceanRefSource), context
+        )
+        refOverlay.loadingBackgroundColor = Color.TRANSPARENT
+        refOverlay.loadingLineColor = Color.TRANSPARENT
+        mapView.overlays.add(refOverlay)
+
+        // Capa 2: OpenSeaMap — marcas de navegación (boyas, luces, puertos, peligros)
         val openSeaMapSource = object : OnlineTileSourceBase(
             "OpenSeaMap", 3, 18, 256, ".png",
             arrayOf("https://tiles.openseamap.org/seamark/")
         ) {
-            override fun getTileURLString(pMapTileIndex: Long): String {
-                return baseUrl +
+            override fun getTileURLString(pMapTileIndex: Long): String =
+                baseUrl +
                     MapTileIndex.getZoom(pMapTileIndex) + "/" +
                     MapTileIndex.getX(pMapTileIndex) + "/" +
                     MapTileIndex.getY(pMapTileIndex) + mImageFilenameEnding
-            }
         }
-
-        val nauticalTilesOverlay = TilesOverlay(
-            org.osmdroid.tileprovider.MapTileProviderBasic(context, openSeaMapSource),
-            context
+        val seamarkOverlay = TilesOverlay(
+            org.osmdroid.tileprovider.MapTileProviderBasic(context, openSeaMapSource), context
         )
-        nauticalTilesOverlay.loadingBackgroundColor = Color.TRANSPARENT
-        nauticalTilesOverlay.loadingLineColor = Color.TRANSPARENT
-        mapView.overlays.add(nauticalTilesOverlay)
+        seamarkOverlay.loadingBackgroundColor = Color.TRANSPARENT
+        seamarkOverlay.loadingLineColor = Color.TRANSPARENT
+        mapView.overlays.add(seamarkOverlay)
     }
 
     // ─────────────────────────────────────────────────────────
@@ -203,6 +230,12 @@ class MapFragment : Fragment() {
                 val wp = Waypoint(name = name, latitude = point.latitude, longitude = point.longitude)
                 viewModel.startNavigationTo(wp)
                 setDestinationMarker(point, name)
+                // Calcular ruta marina evitando tierra y zonas de poco fondo
+                Toast.makeText(context, "Calculando ruta marina...", Toast.LENGTH_SHORT).show()
+                val gps = viewModel.gpsData.value
+                if (gps.isValid) {
+                    viewModel.calculateMarineRoute(gps.latitude, gps.longitude, point.latitude, point.longitude)
+                }
             }
             .setNegativeButton("Cancelar", null)
             .show()
@@ -332,15 +365,30 @@ class MapFragment : Fragment() {
     }
 
     private fun showLayersMenu() {
-        val options = arrayOf("Cartas náuticas (OpenSeaMap)", "Satélite")
+        val options = arrayOf(
+            "Carta náutica (ESRI Ocean) ⚓",
+            "OpenStreetMap estándar",
+            "Satélite"
+        )
         MaterialAlertDialogBuilder(requireContext())
-            .setTitle("Capas del mapa")
+            .setTitle("Capa base del mapa")
             .setItems(options) { _, which ->
                 when (which) {
-                    0 -> mapView.setTileSource(TileSourceFactory.MAPNIK)
-                    1 -> mapView.setTileSource(
+                    0 -> {
+                        val esriOcean = object : OnlineTileSourceBase(
+                            "ESRIOcean", 2, 18, 256, ".jpg",
+                            arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/")
+                        ) {
+                            override fun getTileURLString(pMapTileIndex: Long): String =
+                                baseUrl + MapTileIndex.getZoom(pMapTileIndex) + "/" +
+                                    MapTileIndex.getY(pMapTileIndex) + "/" + MapTileIndex.getX(pMapTileIndex)
+                        }
+                        mapView.setTileSource(esriOcean)
+                    }
+                    1 -> mapView.setTileSource(TileSourceFactory.MAPNIK)
+                    2 -> mapView.setTileSource(
                         XYTileSource("Satellite", 2, 20, 256, ".jpg",
-                            arrayOf("https://mt0.google.com/vt/lyrs=s&hl=en&x=", "https://mt1.google.com/vt/lyrs=s&hl=en&x="))
+                            arrayOf("https://mt0.google.com/vt/lyrs=s&hl=en&x="))
                     )
                 }
                 mapView.invalidate()
@@ -365,9 +413,15 @@ class MapFragment : Fragment() {
             if (state.isNavigating && state.destination != null) {
                 binding.navigationPanel.isVisible = true
                 updateNavigationPanel(state)
-                drawRouteLine(state)
             } else {
                 binding.navigationPanel.isVisible = false
+            }
+        }
+
+        // Ruta marina calculada por Brouter
+        viewModel.marineRoutePoints.observe(viewLifecycleOwner) { points ->
+            if (points.isNotEmpty()) {
+                drawMarineRoute(points)
             }
         }
 
@@ -454,6 +508,20 @@ class MapFragment : Fragment() {
         mapView.invalidate()
     }
 
+    // Dibuja ruta marina calculada por Brouter (evita tierra y zonas de poco fondo)
+    private fun drawMarineRoute(points: List<GeoPoint>) {
+        routeOverlay?.let { mapView.overlays.remove(it) }
+        routeOverlay = Polyline(mapView).apply {
+            setPoints(points)
+            outlinePaint.color = Color.CYAN
+            outlinePaint.strokeWidth = 6f
+            outlinePaint.style = Paint.Style.STROKE
+        }
+        mapView.overlays.add(routeOverlay!!)
+        mapView.invalidate()
+    }
+
+    // Fallback: línea recta punteada si Brouter no está disponible
     private fun drawRouteLine(state: com.marinenavigator.data.models.NavigationState) {
         val dest = state.destination ?: return
         routeOverlay?.let { mapView.overlays.remove(it) }
@@ -463,7 +531,7 @@ class MapFragment : Fragment() {
                 GeoPoint(dest.latitude, dest.longitude)
             ))
             outlinePaint.color = Color.CYAN
-            outlinePaint.strokeWidth = 5f
+            outlinePaint.strokeWidth = 4f
             outlinePaint.style = Paint.Style.STROKE
             outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(20f, 10f), 0f)
         }
