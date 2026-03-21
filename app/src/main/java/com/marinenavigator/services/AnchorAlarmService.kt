@@ -2,7 +2,6 @@ package com.marinenavigator.services
 
 import android.app.*
 import android.content.Intent
-import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.*
 import androidx.core.app.NotificationCompat
@@ -138,10 +137,7 @@ class AnchorAlarmService : LifecycleService() {
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setSound(alarmUri, AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ALARM)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build())
+            .setSound(alarmUri)
             .build()
     }
 
