@@ -25,7 +25,7 @@ object MarineRouter {
     private const val GRID_N        = 200   // resolución cuadrícula 200×200
     private const val PADDING       = 0.15  // grados de margen
     private const val HAZARD_BUFFER = 2     // celdas de seguridad alrededor de cada peligro puntual
-    private const val COAST_BUFFER  = 1     // celdas de buffer alrededor de los propios segmentos de costa
+    private const val COAST_BUFFER  = 2     // celdas de buffer alrededor de los segmentos de costa (muro sólido)
     private const val RDP_EPSILON   = 0.0008 // umbral de simplificación Ramer-Douglas-Peucker (~80 m)
 
     data class LatLon(val lat: Double, val lon: Double)
@@ -57,7 +57,7 @@ object MarineRouter {
                 return@withContext listOf(GeoPoint(fromLat, fromLon), GeoPoint(toLat, toLon))
             }
 
-            val grid = buildGrid(coastSegments, hazardPoints, hazardAreas, south, west, north, east)
+            val grid = buildGrid(coastSegments, hazardPoints, hazardAreas, south, west, north, east, fromLat, fromLon)
             val path = aStar(fromLat, fromLon, toLat, toLon, south, west, north, east, grid)
 
             if (path.size < 2) listOf(GeoPoint(fromLat, fromLon), GeoPoint(toLat, toLon))
@@ -167,56 +167,25 @@ object MarineRouter {
 
     // ─────────────────────────────────────────────────────────
     // Construir cuadrícula combinando tierra + peligros
+    //
+    // Estrategia: rasterizar las costas como MUROS y luego hacer
+    // flood fill desde el origen (siempre en el mar). Así se
+    // identifica correctamente mar vs tierra incluso cuando los
+    // segmentos de costa OSM son abiertos (no cierran polígono).
     // ─────────────────────────────────────────────────────────
     private fun buildGrid(
         coastSegments: List<Pair<LatLon, LatLon>>,
         hazardPoints:  List<LatLon>,
         hazardAreas:   List<List<Pair<LatLon, LatLon>>>,
-        south: Double, west: Double, north: Double, east: Double
+        south: Double, west: Double, north: Double, east: Double,
+        fromLat: Double, fromLon: Double
     ): Array<BooleanArray> {
         val latStep = (north - south) / GRID_N
         val lonStep = (east - west)  / GRID_N
-        val grid = Array(GRID_N) { BooleanArray(GRID_N) }
+        val walls = Array(GRID_N) { BooleanArray(GRID_N) }
 
-        // 1. Marcar TIERRA con algoritmo Winding Number sobre segmentos de costa OSM.
-        //    Convención OSM: el MAR está a la DERECHA de la dirección de viaje → la tierra
-        //    queda a la izquierda → los polígonos de tierra son CCW.
-        //    Winding Number != 0 ⟹ el punto está en tierra.
-        //
-        //    Para cada segmento (p1→p2) emitido hacia el este (+lon) desde el punto:
-        //      · cruce ascendente (p1.lat ≤ lat < p2.lat) y punto a la IZQUIERDA del seg. → wn++
-        //      · cruce descendente (p2.lat ≤ lat < p1.lat) y punto a la DERECHA del seg. → wn--
-        //    "isLeft = (p2.lon-p1.lon)*(lat-p1.lat) - (lon-p1.lon)*(p2.lat-p1.lat)"
-        //      > 0 ⟹ punto a la izquierda; < 0 ⟹ punto a la derecha
-        for (row in 0 until GRID_N) {
-            val lat = south + (row + 0.5) * latStep
-            for (col in 0 until GRID_N) {
-                val lon = west + (col + 0.5) * lonStep
-                var wn = 0
-                for ((p1, p2) in coastSegments) {
-                    if (p1.lat <= lat) {
-                        if (p2.lat > lat) {
-                            // cruce ascendente
-                            val cross = (p2.lon - p1.lon) * (lat - p1.lat) -
-                                        (lon    - p1.lon) * (p2.lat - p1.lat)
-                            if (cross > 0) wn++
-                        }
-                    } else {
-                        if (p2.lat <= lat) {
-                            // cruce descendente
-                            val cross = (p2.lon - p1.lon) * (lat - p1.lat) -
-                                        (lon    - p1.lon) * (p2.lat - p1.lat)
-                            if (cross < 0) wn--
-                        }
-                    }
-                }
-                if (wn != 0) grid[row][col] = true
-            }
-        }
-
-        // 2. Rasterizar los propios segmentos de costa y añadir un buffer de seguridad
-        //    (asegura que las celdas por las que pasa la línea de costa queden bloqueadas
-        //    incluso cuando el winding number falla por polígonos incompletos en la bbox)
+        // 1. Rasterizar segmentos de costa como muros sólidos con buffer.
+        //    COAST_BUFFER=2 garantiza que no haya huecos entre celdas adyacentes.
         for ((p1, p2) in coastSegments) {
             val r1 = ((p1.lat - south) / latStep).toInt().coerceIn(0, GRID_N - 1)
             val c1 = ((p1.lon - west)  / lonStep).toInt().coerceIn(0, GRID_N - 1)
@@ -227,22 +196,20 @@ object MarineRouter {
                 val t = s.toDouble() / steps
                 val r = (r1 + t * (r2 - r1)).toInt().coerceIn(0, GRID_N - 1)
                 val c = (c1 + t * (c2 - c1)).toInt().coerceIn(0, GRID_N - 1)
-                for (dr in -COAST_BUFFER..COAST_BUFFER) {
+                for (dr in -COAST_BUFFER..COAST_BUFFER)
                     for (dc in -COAST_BUFFER..COAST_BUFFER) {
                         val nr = r + dr; val nc = c + dc
-                        if (nr in 0 until GRID_N && nc in 0 until GRID_N) grid[nr][nc] = true
+                        if (nr in 0 until GRID_N && nc in 0 until GRID_N) walls[nr][nc] = true
                     }
-                }
             }
         }
 
-        // 3. Marcar ÁREAS DE PELIGRO (arrecifes/bajos como polígono) con ray casting eastward.
-        //    Ray hacia el ESTE (+lon): conta cruces donde iLon > lon (a la derecha del punto).
+        // 2. Marcar ÁREAS DE PELIGRO (arrecifes/bajos) con ray casting eastward.
         for (areaSegs in hazardAreas) {
             for (row in 0 until GRID_N) {
                 val lat = south + (row + 0.5) * latStep
                 for (col in 0 until GRID_N) {
-                    if (grid[row][col]) continue  // ya marcada
+                    if (walls[row][col]) continue
                     val lon = west + (col + 0.5) * lonStep
                     var crossings = 0
                     for ((p1, p2) in areaSegs) {
@@ -251,27 +218,56 @@ object MarineRouter {
                         if (lat < minLat || lat >= maxLat) continue
                         val t    = (lat - p1.lat) / (p2.lat - p1.lat)
                         val iLon = p1.lon + t * (p2.lon - p1.lon)
-                        if (iLon > lon) crossings++   // ray eastward: contar cruces a la derecha
+                        if (iLon > lon) crossings++
                     }
-                    if (crossings % 2 == 1) grid[row][col] = true
+                    if (crossings % 2 == 1) walls[row][col] = true
                 }
             }
         }
 
-        // 4. Marcar PELIGROS PUNTUALES (rocas, wreck, etc.) con buffer de seguridad
+        // 3. Marcar PELIGROS PUNTUALES con buffer de seguridad.
         for (pt in hazardPoints) {
-            val centerRow = ((pt.lat - south) / latStep).toInt().coerceIn(0, GRID_N - 1)
-            val centerCol = ((pt.lon - west)  / lonStep).toInt().coerceIn(0, GRID_N - 1)
-            for (dr in -HAZARD_BUFFER..HAZARD_BUFFER) {
+            val cr = ((pt.lat - south) / latStep).toInt().coerceIn(0, GRID_N - 1)
+            val cc = ((pt.lon - west)  / lonStep).toInt().coerceIn(0, GRID_N - 1)
+            for (dr in -HAZARD_BUFFER..HAZARD_BUFFER)
                 for (dc in -HAZARD_BUFFER..HAZARD_BUFFER) {
-                    val r = centerRow + dr
-                    val c = centerCol + dc
-                    if (r in 0 until GRID_N && c in 0 until GRID_N) grid[r][c] = true
+                    val nr = cr + dr; val nc = cc + dc
+                    if (nr in 0 until GRID_N && nc in 0 until GRID_N) walls[nr][nc] = true
+                }
+        }
+
+        // 4. Flood fill desde el origen (punto en el mar) para identificar todas
+        //    las celdas de mar alcanzables. Cualquier celda NO alcanzable se trata
+        //    como tierra aunque no tenga segmento de costa explícito.
+        //    → Resuelve el problema de segmentos de costa abiertos (no cierran polígono).
+        var seedRow = ((fromLat - south) / latStep).toInt().coerceIn(0, GRID_N - 1)
+        var seedCol = ((fromLon - west)  / lonStep).toInt().coerceIn(0, GRID_N - 1)
+        // Si el origen cayó sobre un muro, buscar celda libre más cercana
+        if (walls[seedRow][seedCol]) {
+            outer@ for (radius in 1..20) {
+                for (dr in -radius..radius) for (dc in -radius..radius) {
+                    val nr = seedRow + dr; val nc = seedCol + dc
+                    if (nr in 0 until GRID_N && nc in 0 until GRID_N && !walls[nr][nc]) {
+                        seedRow = nr; seedCol = nc; break@outer
+                    }
                 }
             }
         }
+        val sea = Array(GRID_N) { BooleanArray(GRID_N) }
+        val queue = ArrayDeque<Int>()
+        sea[seedRow][seedCol] = true
+        queue.add(seedRow * GRID_N + seedCol)
+        while (queue.isNotEmpty()) {
+            val idx = queue.removeFirst()
+            val r = idx / GRID_N; val c = idx % GRID_N
+            if (r > 0       && !sea[r-1][c] && !walls[r-1][c]) { sea[r-1][c] = true; queue.add((r-1)*GRID_N+c) }
+            if (r < GRID_N-1 && !sea[r+1][c] && !walls[r+1][c]) { sea[r+1][c] = true; queue.add((r+1)*GRID_N+c) }
+            if (c > 0       && !sea[r][c-1] && !walls[r][c-1]) { sea[r][c-1] = true; queue.add(r*GRID_N+c-1) }
+            if (c < GRID_N-1 && !sea[r][c+1] && !walls[r][c+1]) { sea[r][c+1] = true; queue.add(r*GRID_N+c+1) }
+        }
 
-        return grid
+        // Celda bloqueada = muro O no alcanzable desde el mar
+        return Array(GRID_N) { r -> BooleanArray(GRID_N) { c -> walls[r][c] || !sea[r][c] } }
     }
 
     // ─────────────────────────────────────────────────────────
