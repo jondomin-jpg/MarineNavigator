@@ -27,7 +27,6 @@ import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapEventsReceiver
 import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
-import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.util.MapTileIndex
 import org.osmdroid.views.MapView
@@ -52,6 +51,8 @@ class MapFragment : Fragment() {
     private val waypointMarkers = mutableListOf<Marker>()
     private var followLocation = true
     private var showNauticalCharts = true
+    private var mapEventsOverlay: MapEventsOverlay? = null
+    private var scaleBarOverlay: ScaleBarOverlay? = null
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -129,20 +130,21 @@ class MapFragment : Fragment() {
         mapView.overlays.add(locationOverlay)
 
         // Overlay para tap en el mapa
-        val mapEventsOverlay = MapEventsOverlay(object : MapEventsReceiver {
+        mapEventsOverlay = MapEventsOverlay(object : MapEventsReceiver {
             override fun singleTapConfirmedHelper(p: GeoPoint): Boolean = false
             override fun longPressHelper(p: GeoPoint): Boolean {
                 showLongPressMenu(p)
                 return true
             }
         })
-        mapView.overlays.add(mapEventsOverlay)
+        mapView.overlays.add(mapEventsOverlay!!)
 
         // Escala
-        val scaleBar = ScaleBarOverlay(mapView)
-        scaleBar.setUnitsOfMeasure(ScaleBarOverlay.UnitsOfMeasure.nautical)
-        scaleBar.setAlignRight(true)
-        mapView.overlays.add(scaleBar)
+        scaleBarOverlay = ScaleBarOverlay(mapView).apply {
+            setUnitsOfMeasure(ScaleBarOverlay.UnitsOfMeasure.nautical)
+            setAlignRight(true)
+        }
+        mapView.overlays.add(scaleBarOverlay!!)
 
         mapView.invalidate()
     }
@@ -194,6 +196,96 @@ class MapFragment : Fragment() {
         seamarkOverlay.loadingBackgroundColor = Color.TRANSPARENT
         seamarkOverlay.loadingLineColor = Color.TRANSPARENT
         mapView.overlays.add(seamarkOverlay)
+    }
+
+    // Fuente de tiles de satélite (Google) con URL correcta
+    private fun createSatelliteSource() = object : OnlineTileSourceBase(
+        "GoogleSat", 2, 20, 256, ".jpg",
+        arrayOf(
+            "https://mt0.google.com/vt/lyrs=s&hl=en&",
+            "https://mt1.google.com/vt/lyrs=s&hl=en&",
+            "https://mt2.google.com/vt/lyrs=s&hl=en&"
+        )
+    ) {
+        override fun getTileURLString(pMapTileIndex: Long): String {
+            val z = MapTileIndex.getZoom(pMapTileIndex)
+            val x = MapTileIndex.getX(pMapTileIndex)
+            val y = MapTileIndex.getY(pMapTileIndex)
+            return "${baseUrl}x=$x&y=$y&z=$z"
+        }
+    }
+
+    // Capa de batimetría GEBCO (profundidades oceánicas globales) + peligros náuticos
+    private fun addBathymetryAndHazardOverlays() {
+        // GEBCO — profundidades globales como tiles XYZ
+        val gebcoSource = object : OnlineTileSourceBase(
+            "GEBCO", 2, 13, 256, ".png",
+            arrayOf("https://tiles.gebco.net/tiles/gebco_latest/")
+        ) {
+            override fun getTileURLString(pMapTileIndex: Long): String {
+                val z = MapTileIndex.getZoom(pMapTileIndex)
+                val x = MapTileIndex.getX(pMapTileIndex)
+                val y = MapTileIndex.getY(pMapTileIndex)
+                return "$baseUrl$z/$x/$y.png"
+            }
+        }
+        val gebcoOverlay = TilesOverlay(
+            org.osmdroid.tileprovider.MapTileProviderBasic(context, gebcoSource), context
+        )
+        gebcoOverlay.loadingBackgroundColor = Color.TRANSPARENT
+        gebcoOverlay.loadingLineColor = Color.TRANSPARENT
+        mapView.overlays.add(gebcoOverlay)
+
+        // OpenNauticalChart — curvas de nivel de profundidad y zonas de peligro
+        val oncSource = object : OnlineTileSourceBase(
+            "OpenNauticalChart", 3, 18, 256, ".png",
+            arrayOf("https://tiles.opennauticalchart.org/tiles/")
+        ) {
+            override fun getTileURLString(pMapTileIndex: Long): String {
+                val z = MapTileIndex.getZoom(pMapTileIndex)
+                val x = MapTileIndex.getX(pMapTileIndex)
+                val y = MapTileIndex.getY(pMapTileIndex)
+                return "$baseUrl$z/$x/$y.png"
+            }
+        }
+        val oncOverlay = TilesOverlay(
+            org.osmdroid.tileprovider.MapTileProviderBasic(context, oncSource), context
+        )
+        oncOverlay.loadingBackgroundColor = Color.TRANSPARENT
+        oncOverlay.loadingLineColor = Color.TRANSPARENT
+        mapView.overlays.add(oncOverlay)
+
+        // OpenSeaMap — marcas de navegación (boyas, luces, peligros puntuales)
+        val openSeaMapSource = object : OnlineTileSourceBase(
+            "OpenSeaMap", 3, 18, 256, ".png",
+            arrayOf("https://tiles.openseamap.org/seamark/")
+        ) {
+            override fun getTileURLString(pMapTileIndex: Long): String =
+                baseUrl +
+                    MapTileIndex.getZoom(pMapTileIndex) + "/" +
+                    MapTileIndex.getX(pMapTileIndex) + "/" +
+                    MapTileIndex.getY(pMapTileIndex) + mImageFilenameEnding
+        }
+        val seamarkOverlay = TilesOverlay(
+            org.osmdroid.tileprovider.MapTileProviderBasic(context, openSeaMapSource), context
+        )
+        seamarkOverlay.loadingBackgroundColor = Color.TRANSPARENT
+        seamarkOverlay.loadingLineColor = Color.TRANSPARENT
+        mapView.overlays.add(seamarkOverlay)
+    }
+
+    // Restaura todos los overlays no-tile tras cambiar capa base
+    private fun restoreNonTileOverlays() {
+        mapView.overlays.add(locationOverlay)
+        fishingMarkers.forEach { mapView.overlays.add(it) }
+        waypointMarkers.forEach { mapView.overlays.add(it) }
+        routeOverlay?.let { mapView.overlays.add(it) }
+        destinationMarker?.let { mapView.overlays.add(it) }
+        originMarker?.let { mapView.overlays.add(it) }
+        anchorCircle?.let { mapView.overlays.add(it) }
+        mapEventsOverlay?.let { mapView.overlays.add(it) }
+        scaleBarOverlay?.let { mapView.overlays.add(it) }
+        mapView.invalidate()
     }
 
     // ─────────────────────────────────────────────────────────
@@ -379,30 +471,26 @@ class MapFragment : Fragment() {
 
     private fun showLayersMenu() {
         val options = arrayOf(
-            "OpenStreetMap + Cartas IHM ⚓",
-            "Satélite + Cartas IHM ⚓"
+            "OSM + Cartas IHM ⚓",
+            "Satélite + Cartas IHM ⚓",
+            "OSM + Batimetría + Peligros 🗺️",
+            "Satélite + Batimetría + Peligros 🗺️"
         )
         MaterialAlertDialogBuilder(requireContext())
-            .setTitle("Capa base del mapa")
+            .setTitle("Capa del mapa")
             .setItems(options) { _, which ->
-                // Limpiar overlays actuales excepto los de marcadores
                 mapView.overlays.clear()
-                // Añadir rotación
-                val rot = org.osmdroid.views.overlay.gestures.RotationGestureOverlay(mapView)
+                val rot = RotationGestureOverlay(mapView)
                 rot.isEnabled = true
                 mapView.overlays.add(rot)
 
                 when (which) {
-                    0 -> mapView.setTileSource(TileSourceFactory.MAPNIK)
-                    1 -> mapView.setTileSource(
-                        XYTileSource("Satellite", 2, 20, 256, ".jpg",
-                            arrayOf("https://mt0.google.com/vt/lyrs=s&hl=en&"))
-                    )
+                    0 -> { mapView.setTileSource(TileSourceFactory.MAPNIK); addNauticalChartOverlay() }
+                    1 -> { mapView.setTileSource(createSatelliteSource()); addNauticalChartOverlay() }
+                    2 -> { mapView.setTileSource(TileSourceFactory.MAPNIK); addBathymetryAndHazardOverlays() }
+                    3 -> { mapView.setTileSource(createSatelliteSource()); addBathymetryAndHazardOverlays() }
                 }
-                // Volver a añadir capas náuticas y de posición
-                addNauticalChartOverlay()
-                mapView.overlays.add(locationOverlay)
-                mapView.invalidate()
+                restoreNonTileOverlays()
             }
             .show()
     }
