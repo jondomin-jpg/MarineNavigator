@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: [ master, main ]
+    branches: [ master, main, 'claude/**' ]
   pull_request:
     branches: [ master, main ]
   workflow_dispatch:  # permite lanzarlo manualmente desde GitHub
