@@ -167,7 +167,7 @@ class MapFragment : Fragment() {
                 val minLat = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 1) / n))))
                 val bbox = "$minLon,$minLat,$maxLon,$maxLat"
                 return "$baseUrl?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap" +
-                    "&LAYERS=0&STYLES=&SRS=EPSG:4326" +
+                    "&LAYERS=MS:ENC&STYLES=&SRS=EPSG:4326" +
                     "&BBOX=$bbox&WIDTH=256&HEIGHT=256" +
                     "&FORMAT=image/png&TRANSPARENT=TRUE"
             }
@@ -215,18 +215,26 @@ class MapFragment : Fragment() {
         }
     }
 
-    // Capa de batimetría GEBCO (profundidades oceánicas globales) + peligros náuticos
+    // Capa de batimetría GEBCO (WMS oficial) + curvas EMODnet + peligros náuticos
     private fun addBathymetryAndHazardOverlays() {
-        // GEBCO — profundidades globales como tiles XYZ
+        // GEBCO WMS oficial — profundidades oceánicas globales como mapa de colores
         val gebcoSource = object : OnlineTileSourceBase(
-            "GEBCO", 2, 13, 256, ".png",
-            arrayOf("https://tiles.gebco.net/tiles/gebco_latest/")
+            "GEBCO_WMS", 2, 14, 256, ".png",
+            arrayOf("https://www.gebco.net/data_and_products/gebco_web_services/web_map_service/mapserv")
         ) {
             override fun getTileURLString(pMapTileIndex: Long): String {
-                val z = MapTileIndex.getZoom(pMapTileIndex)
+                val z = MapTileIndex.getZoom(pMapTileIndex).toInt()
                 val x = MapTileIndex.getX(pMapTileIndex)
                 val y = MapTileIndex.getY(pMapTileIndex)
-                return "$baseUrl$z/$x/$y.png"
+                val n = Math.pow(2.0, z.toDouble())
+                val minLon = x / n * 360.0 - 180.0
+                val maxLon = (x + 1) / n * 360.0 - 180.0
+                val maxLat = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))))
+                val minLat = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 1) / n))))
+                val bbox = "$minLon,$minLat,$maxLon,$maxLat"
+                return "$baseUrl?service=WMS&request=GetMap&version=1.1.1" +
+                    "&layers=GEBCO_LATEST&styles=&format=image/png&transparent=true" +
+                    "&SRS=EPSG:4326&bbox=$bbox&width=256&height=256"
             }
         }
         val gebcoOverlay = TilesOverlay(
@@ -236,24 +244,33 @@ class MapFragment : Fragment() {
         gebcoOverlay.loadingLineColor = Color.TRANSPARENT
         mapView.overlays.add(gebcoOverlay)
 
-        // OpenNauticalChart — curvas de nivel de profundidad y zonas de peligro
-        val oncSource = object : OnlineTileSourceBase(
-            "OpenNauticalChart", 3, 18, 256, ".png",
-            arrayOf("https://tiles.opennauticalchart.org/tiles/")
+        // EMODnet Bathymetry WMS — curvas batimétricas (isobaras de profundidad) para aguas europeas
+        val emodnetSource = object : OnlineTileSourceBase(
+            "EMODnet_Contours", 3, 18, 256, ".png",
+            arrayOf("https://ows.emodnet-bathymetry.eu/wms")
         ) {
             override fun getTileURLString(pMapTileIndex: Long): String {
-                val z = MapTileIndex.getZoom(pMapTileIndex)
+                val z = MapTileIndex.getZoom(pMapTileIndex).toInt()
                 val x = MapTileIndex.getX(pMapTileIndex)
                 val y = MapTileIndex.getY(pMapTileIndex)
-                return "$baseUrl$z/$x/$y.png"
+                val n = Math.pow(2.0, z.toDouble())
+                val minLon = x / n * 360.0 - 180.0
+                val maxLon = (x + 1) / n * 360.0 - 180.0
+                val maxLat = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))))
+                val minLat = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 1) / n))))
+                val bbox = "$minLon,$minLat,$maxLon,$maxLat"
+                return "$baseUrl?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap" +
+                    "&LAYERS=emodnet:contours&STYLES=&SRS=EPSG:4326" +
+                    "&BBOX=$bbox&WIDTH=256&HEIGHT=256" +
+                    "&FORMAT=image/png&TRANSPARENT=TRUE"
             }
         }
-        val oncOverlay = TilesOverlay(
-            org.osmdroid.tileprovider.MapTileProviderBasic(context, oncSource), context
+        val emodnetOverlay = TilesOverlay(
+            org.osmdroid.tileprovider.MapTileProviderBasic(context, emodnetSource), context
         )
-        oncOverlay.loadingBackgroundColor = Color.TRANSPARENT
-        oncOverlay.loadingLineColor = Color.TRANSPARENT
-        mapView.overlays.add(oncOverlay)
+        emodnetOverlay.loadingBackgroundColor = Color.TRANSPARENT
+        emodnetOverlay.loadingLineColor = Color.TRANSPARENT
+        mapView.overlays.add(emodnetOverlay)
 
         // OpenSeaMap — marcas de navegación (boyas, luces, peligros puntuales)
         val openSeaMapSource = object : OnlineTileSourceBase(
