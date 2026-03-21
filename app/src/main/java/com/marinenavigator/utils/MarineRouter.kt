@@ -22,11 +22,12 @@ import kotlin.math.sqrt
  */
 object MarineRouter {
 
-    private const val GRID_N        = 200   // resolución cuadrícula 200×200
-    private const val PADDING       = 0.15  // grados de margen
-    private const val HAZARD_BUFFER = 2     // celdas de seguridad alrededor de cada peligro puntual
-    private const val COAST_BUFFER  = 2     // celdas de buffer alrededor de los segmentos de costa (muro sólido)
-    private const val RDP_EPSILON   = 0.0008 // umbral de simplificación Ramer-Douglas-Peucker (~80 m)
+    private const val GRID_N          = 200   // resolución cuadrícula 200×200
+    private const val PADDING         = 0.15  // grados de margen
+    private const val HAZARD_BUFFER   = 2     // celdas de seguridad alrededor de cada peligro puntual
+    private const val COAST_BUFFER    = 2     // celdas de buffer alrededor de los segmentos de costa (muro sólido)
+    private const val RDP_EPSILON     = 0.0008 // umbral de simplificación Ramer-Douglas-Peucker (~80 m)
+    private const val MIN_SAFE_DEPTH  = 3.0   // metros mínimos de profundidad navegable
 
     data class LatLon(val lat: Double, val lon: Double)
     data class Cell(val row: Int, val col: Int)
@@ -84,21 +85,31 @@ object MarineRouter {
         val bbox = "$south,$west,$north,$east"
         // Una sola consulta que obtiene todos los elementos relevantes
         val query = """
-            [out:json][timeout:40];
+            [out:json][timeout:55];
             (
               way["natural"="coastline"]($bbox);
               way["natural"="reef"]($bbox);
               way["natural"="shoal"]($bbox);
+              way["natural"="mud"]($bbox);
               node["natural"="reef"]($bbox);
               node["natural"="shoal"]($bbox);
               node["seamark:type"="rock_awash"]($bbox);
               node["seamark:type"="rock_submerged"]($bbox);
               node["seamark:type"="rock"]($bbox);
+              node["seamark:type"="underwater_rock"]($bbox);
               node["seamark:type"="obstruction"]($bbox);
               node["seamark:type"="wreck"]($bbox);
               node["seamark:type"="snag"]($bbox);
+              node["seamark:type"="foul_ground"]($bbox);
+              node["seamark:type"="shoal"]($bbox);
               way["seamark:type"="obstruction"]($bbox);
               way["seamark:type"="wreck"]($bbox);
+              way["seamark:type"="rock_awash"]($bbox);
+              way["seamark:type"="underwater_rock"]($bbox);
+              way["seamark:type"="foul_ground"]($bbox);
+              way["seamark:type"="shoal"]($bbox);
+              way["seamark:type"="depth_area"]($bbox);
+              relation["seamark:type"="depth_area"]($bbox);
             );
             out geom;
         """.trimIndent()
@@ -107,7 +118,7 @@ object MarineRouter {
         val conn = URL("https://overpass-api.de/api/interpreter?data=$encoded")
             .openConnection() as HttpURLConnection
         conn.connectTimeout = 25_000
-        conn.readTimeout    = 40_000
+        conn.readTimeout    = 60_000
         conn.setRequestProperty("User-Agent", "MarineNavigator/1.0")
 
         val coastSegments = mutableListOf<Pair<LatLon, LatLon>>()
@@ -125,16 +136,25 @@ object MarineRouter {
                 val natural   = tags?.optString("natural", "") ?: ""
                 val seamarkType = tags?.optString("seamark:type", "") ?: ""
 
+                // Tipos de peligro puntual reconocidos
+                val isPointHazard = natural in listOf("reef", "shoal") ||
+                    seamarkType in listOf(
+                        "rock_awash", "rock_submerged", "rock", "underwater_rock",
+                        "obstruction", "wreck", "snag", "foul_ground", "shoal"
+                    )
+                // Tipos de peligro de área reconocidos
+                val isAreaHazard = natural in listOf("reef", "shoal", "mud") ||
+                    seamarkType in listOf(
+                        "obstruction", "wreck", "rock_awash", "underwater_rock",
+                        "foul_ground", "shoal"
+                    )
+
                 when (type) {
                     "node" -> {
-                        // Peligros puntuales → marcar con buffer de seguridad
-                        if (natural in listOf("reef", "shoal") ||
-                            seamarkType in listOf("rock_awash", "rock_submerged", "rock",
-                                "obstruction", "wreck", "snag")) {
+                        if (isPointHazard)
                             hazardPoints += LatLon(el.getDouble("lat"), el.getDouble("lon"))
-                        }
                     }
-                    "way" -> {
+                    "way", "relation" -> {
                         if (!el.has("geometry")) continue
                         val geom = el.getJSONArray("geometry")
                         val pts  = (0 until geom.length()).map {
@@ -143,16 +163,36 @@ object MarineRouter {
                         }
                         when {
                             natural == "coastline" -> {
-                                // Segmentos de costa para ray casting
                                 for (j in 0 until pts.size - 1)
                                     coastSegments += Pair(pts[j], pts[j + 1])
                             }
-                            natural in listOf("reef", "shoal") ||
-                            seamarkType in listOf("obstruction", "wreck") -> {
-                                // Área de peligro → lista de segmentos perimetrales
+                            seamarkType == "depth_area" -> {
+                                // Zona de batimetría: solo es peligro si es poco profunda
+                                val depthVal = tags?.let {
+                                    it.optString("seamark:depth_area:depth_range_value1", "")
+                                        .toDoubleOrNull()
+                                        ?: it.optString("seamark:depth_area:value", "").toDoubleOrNull()
+                                        ?: it.optString("depth", "").toDoubleOrNull()
+                                }
+                                // Sin dato de profundidad → usar clase de categoría IHO S-57:
+                                // clase 6 (0-2m) y clase 5 (2-5m) son peligrosas.
+                                // Si no hay ningún dato, tratar como zona segura (no bloquear).
+                                val categoryClass = tags?.optString("seamark:depth_area:category", "")
+                                    ?.toIntOrNull()
+                                val isShallow = when {
+                                    depthVal != null -> depthVal < MIN_SAFE_DEPTH
+                                    categoryClass != null -> categoryClass >= 5
+                                    else -> false
+                                }
+                                if (isShallow && pts.size >= 3) {
+                                    val segs = (0 until pts.size - 1).map { j -> Pair(pts[j], pts[j + 1]) }
+                                    hazardAreas += segs
+                                    hazardPoints += pts
+                                }
+                            }
+                            isAreaHazard -> {
                                 val segs = (0 until pts.size - 1).map { j -> Pair(pts[j], pts[j + 1]) }
                                 hazardAreas += segs
-                                // También los nodos interiores como puntos peligrosos
                                 hazardPoints += pts
                             }
                         }
