@@ -286,9 +286,9 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="MotroSoft"
-        android:textColor="#80FFFFFF"
-        android:textSize="10sp"
+        android:text="by MotroSoft"
+        android:textColor="#B3FFFFFF"
+        android:textSize="13sp"
         android:layout_marginEnd="8dp"
         android:layout_marginBottom="8dp"
         app:layout_constraintEnd_toEndOf="parent"
