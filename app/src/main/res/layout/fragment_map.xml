@@ -43,8 +43,9 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="--°--'N"
-                    android:textColor="#00CFFF"
-                    android:textSize="14sp"
+                    android:textColor="#FFFFFF"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
                     android:fontFamily="monospace" />
 
                 <TextView
@@ -53,8 +54,9 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="--°--'O"
-                    android:textColor="#00CFFF"
-                    android:textSize="14sp"
+                    android:textColor="#FFFFFF"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
                     android:fontFamily="monospace"
                     android:gravity="end" />
             </LinearLayout>

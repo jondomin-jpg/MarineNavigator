@@ -14,7 +14,10 @@ import android.os.Bundle
 import android.view.*
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import android.graphics.Bitmap
+import android.graphics.drawable.BitmapDrawable
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.DrawableCompat
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
@@ -759,11 +762,23 @@ class MapFragment : Fragment() {
         mapView.invalidate()
     }
 
+    private fun markerIcon(drawableRes: Int, tintColor: Int): BitmapDrawable {
+        val px = (44 * resources.displayMetrics.density).toInt()
+        val d = ContextCompat.getDrawable(requireContext(), drawableRes)!!.mutate()
+        DrawableCompat.setTint(d, tintColor)
+        val bmp = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bmp)
+        d.setBounds(0, 0, px, px)
+        d.draw(canvas)
+        return BitmapDrawable(resources, bmp)
+    }
+
     private fun addFishingMarker(point: FishingPoint) {
         val marker = Marker(mapView).apply {
             position = GeoPoint(point.latitude, point.longitude)
             title = point.name
             snippet = if (point.depth != null) "Prof: %.1f m\n%s".format(point.depth, point.notes) else point.notes
+            icon = markerIcon(R.drawable.ic_fishing, Color.parseColor("#00FF88"))
             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
         }
         fishingMarkers.add(marker)
@@ -776,6 +791,7 @@ class MapFragment : Fragment() {
             position = GeoPoint(wp.latitude, wp.longitude)
             title = wp.name
             snippet = wp.notes
+            icon = markerIcon(R.drawable.ic_waypoint, Color.parseColor("#00CFFF"))
             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
         }
         waypointMarkers.add(marker)
