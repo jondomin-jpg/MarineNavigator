@@ -568,10 +568,8 @@ class MapFragment : Fragment() {
 
     private fun showLayersMenu() {
         val options = arrayOf(
-            "OSM + Cartas IHM ⚓",
-            "Satélite + Cartas IHM ⚓",
-            "OSM + Batimetría + Peligros 🗺️",
-            "Satélite + Batimetría + Peligros 🗺️"
+            "OpenSeaMap",
+            "Satélite"
         )
         MaterialAlertDialogBuilder(requireContext())
             .setTitle("Capa del mapa")
@@ -582,10 +580,8 @@ class MapFragment : Fragment() {
                 mapView.overlays.add(rot)
 
                 when (which) {
-                    0 -> { mapView.setTileSource(TileSourceFactory.MAPNIK); addNauticalChartOverlay() }
-                    1 -> { mapView.setTileSource(createSatelliteSource()); addNauticalChartOverlay() }
-                    2 -> { mapView.setTileSource(TileSourceFactory.MAPNIK); addBathymetryAndHazardOverlays() }
-                    3 -> { mapView.setTileSource(createSatelliteSource()); addBathymetryAndHazardOverlays() }
+                    0 -> { mapView.setTileSource(TileSourceFactory.MAPNIK); addBathymetryAndHazardOverlays() }
+                    1 -> { mapView.setTileSource(createSatelliteSource()); addBathymetryAndHazardOverlays() }
                 }
                 restoreNonTileOverlays()
             }
