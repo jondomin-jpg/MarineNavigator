@@ -55,7 +55,8 @@ class MapFragment : Fragment() {
     private var trackOverlay: Polyline? = null   // track grabado en tiempo real
     private var destinationMarker: Marker? = null
     private var originMarker: Marker? = null
-    private var anchorCircle: Polygon? = null
+    private var anchorCircleOverlay: Overlay? = null
+    private var anchorMarkerOverlay: Marker? = null
     private val fishingMarkers = mutableListOf<Marker>()
     private val waypointMarkers = mutableListOf<Marker>()
     private var followLocation = true
@@ -370,7 +371,8 @@ class MapFragment : Fragment() {
         trackOverlay?.let { mapView.overlays.add(it) }
         destinationMarker?.let { mapView.overlays.add(it) }
         originMarker?.let { mapView.overlays.add(it) }
-        anchorCircle?.let { mapView.overlays.add(it) }
+        anchorCircleOverlay?.let { mapView.overlays.add(it) }
+        anchorMarkerOverlay?.let { mapView.overlays.add(it) }
         mapEventsOverlay?.let { mapView.overlays.add(it) }
         scaleBarOverlay?.let { mapView.overlays.add(it) }
         mapView.invalidate()
@@ -804,36 +806,53 @@ class MapFragment : Fragment() {
         val gps = viewModel.gpsData.value
         val c = center ?: if (gps.isValid) GeoPoint(gps.latitude, gps.longitude) else return
 
-        // Crear círculo poligonal aproximado
-        val circlePoints = mutableListOf<GeoPoint>()
-        for (i in 0..360 step 5) {
-            val angle = Math.toRadians(i.toDouble())
-            val dLat = (radiusMeters / 111320.0) * Math.cos(angle)
-            val dLon = (radiusMeters / (111320.0 * Math.cos(Math.toRadians(c.latitude)))) * Math.sin(angle)
-            circlePoints.add(GeoPoint(c.latitude + dLat, c.longitude + dLon))
+        val fillPaint = Paint().apply {
+            color = Color.argb(70, 255, 60, 60)
+            style = Paint.Style.FILL
+            isAntiAlias = true
+        }
+        val strokePaint = Paint().apply {
+            color = Color.rgb(255, 40, 40)
+            style = Paint.Style.STROKE
+            strokeWidth = 5f
+            isAntiAlias = true
         }
 
-        anchorCircle = Polygon(mapView).apply {
-            points = circlePoints
-            fillPaint.color = Color.argb(60, 255, 80, 80)       // rojo semitransparente
-            outlinePaint.color = Color.rgb(255, 60, 60)          // rojo sólido
-            outlinePaint.strokeWidth = 6f * resources.displayMetrics.density
+        anchorCircleOverlay = object : Overlay() {
+            override fun draw(canvas: android.graphics.Canvas, mapView: MapView, shadow: Boolean) {
+                if (shadow) return
+                val proj = mapView.projection
+                val screenCenter = proj.toPixels(c, null)
+                // Calcular radio en píxeles usando un punto al norte
+                val northPoint = GeoPoint(c.latitude + radiusMeters / 111320.0, c.longitude)
+                val screenNorth = proj.toPixels(northPoint, null)
+                val radiusPx = Math.hypot(
+                    (screenNorth.x - screenCenter.x).toDouble(),
+                    (screenNorth.y - screenCenter.y).toDouble()
+                ).toFloat()
+                val cx = screenCenter.x.toFloat()
+                val cy = screenCenter.y.toFloat()
+                canvas.drawCircle(cx, cy, radiusPx, fillPaint)
+                canvas.drawCircle(cx, cy, radiusPx, strokePaint)
+            }
         }
-        mapView.overlays.add(anchorCircle!!)
-        // Marcador de ancla en el centro
-        val anchorMarker = Marker(mapView).apply {
+        mapView.overlays.add(anchorCircleOverlay!!)
+
+        anchorMarkerOverlay = Marker(mapView).apply {
             position = c
             icon = markerIcon(R.drawable.ic_anchor, Color.parseColor("#FF4444"))
             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
             title = "Fondeo (%.0f m)".format(radiusMeters)
         }
-        mapView.overlays.add(anchorMarker)
+        mapView.overlays.add(anchorMarkerOverlay!!)
         mapView.invalidate()
     }
 
     private fun clearAnchorCircle() {
-        anchorCircle?.let { mapView.overlays.remove(it) }
-        anchorCircle = null
+        anchorCircleOverlay?.let { mapView.overlays.remove(it) }
+        anchorCircleOverlay = null
+        anchorMarkerOverlay?.let { mapView.overlays.remove(it) }
+        anchorMarkerOverlay = null
         mapView.invalidate()
     }
 
