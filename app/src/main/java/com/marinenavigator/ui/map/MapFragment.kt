@@ -36,8 +36,6 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.util.MapTileIndex
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.*
-import org.osmdroid.views.overlay.compass.CompassOverlay
-import org.osmdroid.views.overlay.compass.InternalCompassOrientationProvider
 import org.osmdroid.views.overlay.gestures.RotationGestureOverlay
 import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
@@ -60,6 +58,7 @@ class MapFragment : Fragment() {
     private var showNauticalCharts = true
     private var mapEventsOverlay: MapEventsOverlay? = null
     private var scaleBarOverlay: ScaleBarOverlay? = null
+    private var northArrowOverlay: NorthArrowOverlay? = null
 
     // Sensor para brújula física
     private var sensorManager: SensorManager? = null
@@ -78,6 +77,8 @@ class MapFragment : Fragment() {
             while (diff < -180f) diff += 360f
             smoothedCompassBearing = (smoothedCompassBearing + 0.15f * diff + 360f) % 360f
             _binding?.compassView?.setBearing(smoothedCompassBearing)
+            northArrowOverlay?.updateBearing(smoothedCompassBearing)
+            if (::mapView.isInitialized) mapView.postInvalidate()
         }
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
     }
@@ -148,10 +149,9 @@ class MapFragment : Fragment() {
         addNauticalChartOverlay()
         addDefaultDepthContours()
 
-        // Indicador de Norte sobre el mapa
-        val compassOverlay = CompassOverlay(context, InternalCompassOrientationProvider(context), mapView)
-        compassOverlay.enableCompass()
-        mapView.overlays.add(compassOverlay)
+        // Indicador de Norte sobre el mapa (esquina inferior izquierda)
+        northArrowOverlay = NorthArrowOverlay()
+        mapView.overlays.add(northArrowOverlay!!)
 
         // Overlay de posición
         locationOverlay = MyLocationNewOverlay(GpsMyLocationProvider(context), mapView)
