@@ -412,6 +412,8 @@ class MapFragment : Fragment() {
         val editText = TextInputEditText(requireContext()).apply {
             hint = "Nombre del destino"
             setPadding(48, 16, 48, 16)
+            setTextColor(android.graphics.Color.WHITE)
+            setHintTextColor(android.graphics.Color.parseColor("#88AABB"))
         }
         MaterialAlertDialogBuilder(requireContext())
             .setTitle("Navegar a")
@@ -433,6 +435,8 @@ class MapFragment : Fragment() {
         val editText = TextInputEditText(requireContext()).apply {
             hint = "Nombre del waypoint"
             setPadding(48, 16, 48, 16)
+            setTextColor(android.graphics.Color.WHITE)
+            setHintTextColor(android.graphics.Color.parseColor("#88AABB"))
         }
         MaterialAlertDialogBuilder(requireContext())
             .setTitle("Guardar waypoint")
@@ -451,6 +455,8 @@ class MapFragment : Fragment() {
         val editText = TextInputEditText(requireContext()).apply {
             hint = "Nombre del punto de pesca"
             setPadding(48, 16, 48, 16)
+            setTextColor(android.graphics.Color.WHITE)
+            setHintTextColor(android.graphics.Color.parseColor("#88AABB"))
         }
         MaterialAlertDialogBuilder(requireContext())
             .setTitle("Guardar punto de pesca")
@@ -538,6 +544,8 @@ class MapFragment : Fragment() {
         val editText = TextInputEditText(requireContext()).apply {
             hint = "Nombre de la ruta (opcional)"
             setPadding(48, 16, 48, 16)
+            setTextColor(android.graphics.Color.WHITE)
+            setHintTextColor(android.graphics.Color.parseColor("#88AABB"))
         }
         MaterialAlertDialogBuilder(requireContext())
             .setTitle("Grabar ruta")
