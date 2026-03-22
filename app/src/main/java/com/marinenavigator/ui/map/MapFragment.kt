@@ -80,6 +80,7 @@ class MapFragment : Fragment() {
             while (diff > 180f) diff -= 360f
             while (diff < -180f) diff += 360f
             smoothedCompassBearing = (smoothedCompassBearing + 0.15f * diff + 360f) % 360f
+            _binding?.compassView?.setBearing(smoothedCompassBearing)
             _binding?.compassTapeView?.setHeading(smoothedCompassBearing)
             if (::mapView.isInitialized) {
                 _binding?.northMapCompass?.setBearing(mapView.mapOrientation)
