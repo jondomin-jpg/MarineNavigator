@@ -48,7 +48,8 @@ class MapFragment : Fragment() {
 
     private lateinit var mapView: MapView
     private lateinit var locationOverlay: MyLocationNewOverlay
-    private var routeOverlay: Polyline? = null
+    private var routeOverlay: Polyline? = null   // ruta de navegación calculada
+    private var trackOverlay: Polyline? = null   // track grabado en tiempo real
     private var destinationMarker: Marker? = null
     private var originMarker: Marker? = null
     private var anchorCircle: Polygon? = null
@@ -363,6 +364,7 @@ class MapFragment : Fragment() {
         fishingMarkers.forEach { mapView.overlays.add(it) }
         waypointMarkers.forEach { mapView.overlays.add(it) }
         routeOverlay?.let { mapView.overlays.add(it) }
+        trackOverlay?.let { mapView.overlays.add(it) }
         destinationMarker?.let { mapView.overlays.add(it) }
         originMarker?.let { mapView.overlays.add(it) }
         anchorCircle?.let { mapView.overlays.add(it) }
@@ -480,7 +482,6 @@ class MapFragment : Fragment() {
                 val radiusInput = view.findViewById<TextInputEditText>(R.id.etRadius)
                 val radius = radiusInput.text.toString().toDoubleOrNull() ?: 50.0
                 viewModel.activateAnchorAlarm(radius)
-                drawAnchorCircle(radius)
                 Toast.makeText(context, "Alerta de fondeo activada (${radius.toInt()} m)", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Cancelar", null)
@@ -631,9 +632,9 @@ class MapFragment : Fragment() {
             mapView.invalidate()
         }
 
-        // Track activo en el mapa
+        // Track activo en el mapa (en tiempo real durante grabación)
         viewModel.currentTrackPoints.observe(viewLifecycleOwner) { points ->
-            drawSavedRoute(points.map { GeoPoint(it.latitude, it.longitude) })
+            drawLiveTrack(points.map { GeoPoint(it.latitude, it.longitude) })
         }
 
         // Estado grabación
@@ -726,6 +727,20 @@ class MapFragment : Fragment() {
             outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(20f, 10f), 0f)
         }
         mapView.overlays.add(routeOverlay!!)
+        mapView.invalidate()
+    }
+
+    private fun drawLiveTrack(points: List<GeoPoint>) {
+        trackOverlay?.let { mapView.overlays.remove(it) }
+        trackOverlay = null
+        if (points.size < 2) { mapView.invalidate(); return }
+        trackOverlay = Polyline(mapView).apply {
+            setPoints(points)
+            outlinePaint.color = Color.parseColor("#00FF88")  // verde neón para distinguir de la ruta
+            outlinePaint.strokeWidth = 5f
+            outlinePaint.style = Paint.Style.STROKE
+        }
+        mapView.overlays.add(trackOverlay!!)
         mapView.invalidate()
     }
 
