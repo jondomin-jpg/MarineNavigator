@@ -282,6 +282,18 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintBottom_toBottomOf="parent" />
 
+    <!-- Marca de agua MotroSoft -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="MotroSoft"
+        android:textColor="#80FFFFFF"
+        android:textSize="10sp"
+        android:layout_marginEnd="8dp"
+        android:layout_marginBottom="8dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent" />
+
     <!-- FABs laterales -->
     <LinearLayout
         android:layout_width="wrap_content"
