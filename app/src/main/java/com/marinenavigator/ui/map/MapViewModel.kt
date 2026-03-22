@@ -187,6 +187,10 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun renameRoute(route: Route, newName: String) {
+        viewModelScope.launch { db.routeDao().update(route.copy(name = newName)) }
+    }
+
     fun deleteRoute(route: Route) {
         viewModelScope.launch { db.routeDao().delete(route) }
     }
@@ -228,6 +232,10 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun renameWaypoint(waypoint: Waypoint, newName: String) {
+        viewModelScope.launch { db.waypointDao().update(waypoint.copy(name = newName)) }
+    }
+
     fun deleteWaypoint(waypoint: Waypoint) {
         viewModelScope.launch { db.waypointDao().delete(waypoint) }
     }
@@ -241,6 +249,10 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
                 FishingPoint(name = name, latitude = lat, longitude = lon, notes = notes, depth = depth)
             )
         }
+    }
+
+    fun renameFishingPoint(point: FishingPoint, newName: String) {
+        viewModelScope.launch { db.fishingPointDao().update(point.copy(name = newName)) }
     }
 
     fun deleteFishingPoint(point: FishingPoint) {

@@ -39,6 +39,23 @@ class WaypointsFragment : Fragment() {
                     .setPositiveButton("Eliminar") { _, _ -> viewModel.deleteWaypoint(wp) }
                     .setNegativeButton("Cancelar", null)
                     .show()
+            },
+            onRenameClick = { wp ->
+                val input = com.google.android.material.textfield.TextInputEditText(requireContext()).apply {
+                    setText(wp.name)
+                    setPadding(48, 16, 48, 16)
+                    setTextColor(android.graphics.Color.WHITE)
+                    setHintTextColor(android.graphics.Color.parseColor("#88AABB"))
+                }
+                MaterialAlertDialogBuilder(requireContext())
+                    .setTitle("Editar nombre")
+                    .setView(input)
+                    .setPositiveButton("Guardar") { _, _ ->
+                        val name = input.text.toString().trim().ifBlank { return@setPositiveButton }
+                        viewModel.renameWaypoint(wp, name)
+                    }
+                    .setNegativeButton("Cancelar", null)
+                    .show()
             }
         )
 
@@ -65,7 +82,8 @@ class WaypointsFragment : Fragment() {
 
 class WaypointAdapter(
     private val onNavigateClick: (Waypoint) -> Unit,
-    private val onDeleteClick: (Waypoint) -> Unit
+    private val onDeleteClick: (Waypoint) -> Unit,
+    private val onRenameClick: (Waypoint) -> Unit
 ) : RecyclerView.Adapter<WaypointAdapter.VH>() {
 
     private var waypoints: List<Waypoint> = emptyList()
@@ -103,6 +121,7 @@ class WaypointAdapter(
 
             btnNavigateToWp.setOnClickListener { onNavigateClick(wp) }
             btnDeleteWp.setOnClickListener { onDeleteClick(wp) }
+            tvWpName.setOnLongClickListener { onRenameClick(wp); true }
         }
     }
 }

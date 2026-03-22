@@ -62,7 +62,6 @@ class MapFragment : Fragment() {
     private var showNauticalCharts = true
     private var mapEventsOverlay: MapEventsOverlay? = null
     private var scaleBarOverlay: ScaleBarOverlay? = null
-    private var northArrowOverlay: NorthArrowOverlay? = null
 
     // Sensor para brújula física
     private var sensorManager: SensorManager? = null
@@ -81,8 +80,10 @@ class MapFragment : Fragment() {
             while (diff < -180f) diff += 360f
             smoothedCompassBearing = (smoothedCompassBearing + 0.15f * diff + 360f) % 360f
             _binding?.compassView?.setBearing(smoothedCompassBearing)
-            northArrowOverlay?.updateBearing(smoothedCompassBearing)
-            if (::mapView.isInitialized) mapView.postInvalidate()
+            if (::mapView.isInitialized) {
+                _binding?.northMapCompass?.setBearing(mapView.mapOrientation)
+                mapView.postInvalidate()
+            }
         }
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
     }
@@ -153,9 +154,8 @@ class MapFragment : Fragment() {
         addNauticalChartOverlay()
         addDefaultDepthContours()
 
-        // Indicador de Norte sobre el mapa (esquina inferior izquierda)
-        northArrowOverlay = NorthArrowOverlay()
-        mapView.overlays.add(northArrowOverlay!!)
+        // Indicador de Norte: View fija en el layout, se actualiza con mapView.mapOrientation
+        binding.northMapCompass.setBearing(0f)
 
         // Overlay de posición
         locationOverlay = MyLocationNewOverlay(GpsMyLocationProvider(context), mapView)
@@ -815,11 +815,19 @@ class MapFragment : Fragment() {
 
         anchorCircle = Polygon(mapView).apply {
             points = circlePoints
-            fillPaint.color = Color.argb(50, 255, 165, 0)
-            outlinePaint.color = Color.rgb(255, 165, 0)
-            outlinePaint.strokeWidth = 3f
+            fillPaint.color = Color.argb(60, 255, 80, 80)       // rojo semitransparente
+            outlinePaint.color = Color.rgb(255, 60, 60)          // rojo sólido
+            outlinePaint.strokeWidth = 6f * resources.displayMetrics.density
         }
         mapView.overlays.add(anchorCircle!!)
+        // Marcador de ancla en el centro
+        val anchorMarker = Marker(mapView).apply {
+            position = c
+            icon = markerIcon(R.drawable.ic_anchor, Color.parseColor("#FF4444"))
+            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+            title = "Fondeo (%.0f m)".format(radiusMeters)
+        }
+        mapView.overlays.add(anchorMarker)
         mapView.invalidate()
     }
 
