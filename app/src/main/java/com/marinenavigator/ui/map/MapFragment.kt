@@ -114,8 +114,9 @@ class MapFragment : Fragment() {
         rotationOverlay.isEnabled = true
         mapView.overlays.add(rotationOverlay)
 
-        // Overlay de marcas náuticas OpenSeaMap (boyas, luces, puertos)
+        // Overlay de marcas náuticas OpenSeaMap (boyas, luces, puertos) + curvas batimétricas
         addNauticalChartOverlay()
+        addDefaultDepthContours()
 
         // Overlay de posición
         locationOverlay = MyLocationNewOverlay(GpsMyLocationProvider(context), mapView)
@@ -196,6 +197,36 @@ class MapFragment : Fragment() {
         seamarkOverlay.loadingBackgroundColor = Color.TRANSPARENT
         seamarkOverlay.loadingLineColor = Color.TRANSPARENT
         mapView.overlays.add(seamarkOverlay)
+    }
+
+    // Curvas batimétricas EMODnet por defecto (líneas de profundidad como en OpenSeaMap)
+    private fun addDefaultDepthContours() {
+        val emodnetSource = object : OnlineTileSourceBase(
+            "EMODnet_Default", 3, 18, 256, ".png",
+            arrayOf("https://ows.emodnet-bathymetry.eu/wms")
+        ) {
+            override fun getTileURLString(pMapTileIndex: Long): String {
+                val z = MapTileIndex.getZoom(pMapTileIndex).toInt()
+                val x = MapTileIndex.getX(pMapTileIndex)
+                val y = MapTileIndex.getY(pMapTileIndex)
+                val n = Math.pow(2.0, z.toDouble())
+                val minLon = x / n * 360.0 - 180.0
+                val maxLon = (x + 1) / n * 360.0 - 180.0
+                val maxLat = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))))
+                val minLat = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 1) / n))))
+                val bbox = "$minLon,$minLat,$maxLon,$maxLat"
+                return "$baseUrl?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap" +
+                    "&LAYERS=emodnet:contours&STYLES=&SRS=EPSG:4326" +
+                    "&BBOX=$bbox&WIDTH=256&HEIGHT=256" +
+                    "&FORMAT=image/png&TRANSPARENT=TRUE"
+            }
+        }
+        val contourOverlay = TilesOverlay(
+            org.osmdroid.tileprovider.MapTileProviderBasic(context, emodnetSource), context
+        )
+        contourOverlay.loadingBackgroundColor = Color.TRANSPARENT
+        contourOverlay.loadingLineColor = Color.TRANSPARENT
+        mapView.overlays.add(contourOverlay)
     }
 
     // Fuente de tiles de satélite (Google) con URL correcta
@@ -590,6 +621,7 @@ class MapFragment : Fragment() {
         binding.tvLon.text = NavigationUtils.formatLongitude(gps.longitude)
         binding.tvSpeed.text = "%.1f kt".format(gps.speedKnots)
         binding.tvBearing.text = "%.0f° %s".format(gps.bearing, NavigationUtils.bearingName(gps.bearing))
+        binding.compassView.setBearing(gps.bearing)
     }
 
     private fun updateNavigationPanel(state: com.marinenavigator.data.models.NavigationState) {

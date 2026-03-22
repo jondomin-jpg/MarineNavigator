@@ -59,11 +59,12 @@
                     android:gravity="end" />
             </LinearLayout>
 
-            <!-- Fila 2: Velocidad y Rumbo -->
+            <!-- Fila 2: Velocidad, Brújula y Rumbo -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
+                android:gravity="center_vertical"
                 android:layout_marginTop="4dp">
 
                 <TextView
@@ -75,6 +76,12 @@
                     android:textColor="#FFFFFF"
                     android:textSize="22sp"
                     android:textStyle="bold" />
+
+                <com.marinenavigator.ui.map.CompassView
+                    android:id="@+id/compassView"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_marginHorizontal="8dp" />
 
                 <TextView
                     android:id="@+id/tvBearing"
