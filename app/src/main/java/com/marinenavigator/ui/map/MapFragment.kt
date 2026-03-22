@@ -1,10 +1,15 @@
 package com.marinenavigator.ui.map
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Paint
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.os.Bundle
 import android.view.*
 import android.widget.Toast
@@ -31,6 +36,8 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.util.MapTileIndex
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.*
+import org.osmdroid.views.overlay.compass.CompassOverlay
+import org.osmdroid.views.overlay.compass.InternalCompassOrientationProvider
 import org.osmdroid.views.overlay.gestures.RotationGestureOverlay
 import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
@@ -54,6 +61,27 @@ class MapFragment : Fragment() {
     private var mapEventsOverlay: MapEventsOverlay? = null
     private var scaleBarOverlay: ScaleBarOverlay? = null
 
+    // Sensor para brújula física
+    private var sensorManager: SensorManager? = null
+    private var rotationSensor: Sensor? = null
+    private var smoothedCompassBearing = 0f
+    private val rotMatrix = FloatArray(9)
+    private val orientation = FloatArray(3)
+    private val sensorListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            SensorManager.getRotationMatrixFromVector(rotMatrix, event.values)
+            SensorManager.getOrientation(rotMatrix, orientation)
+            val raw = (Math.toDegrees(orientation[0].toDouble()).toFloat() + 360f) % 360f
+            // Filtro paso bajo para suavizar la lectura
+            var diff = raw - smoothedCompassBearing
+            while (diff > 180f) diff -= 360f
+            while (diff < -180f) diff += 360f
+            smoothedCompassBearing = (smoothedCompassBearing + 0.15f * diff + 360f) % 360f
+            _binding?.compassView?.setBearing(smoothedCompassBearing)
+        }
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
+
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -74,6 +102,8 @@ class MapFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        sensorManager = requireContext().getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        rotationSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
         checkPermissionsAndInit()
         setupButtons()
         observeViewModel()
@@ -117,6 +147,11 @@ class MapFragment : Fragment() {
         // Overlay de marcas náuticas OpenSeaMap (boyas, luces, puertos) + curvas batimétricas
         addNauticalChartOverlay()
         addDefaultDepthContours()
+
+        // Indicador de Norte sobre el mapa
+        val compassOverlay = CompassOverlay(context, InternalCompassOrientationProvider(context), mapView)
+        compassOverlay.enableCompass()
+        mapView.overlays.add(compassOverlay)
 
         // Overlay de posición
         locationOverlay = MyLocationNewOverlay(GpsMyLocationProvider(context), mapView)
@@ -621,7 +656,6 @@ class MapFragment : Fragment() {
         binding.tvLon.text = NavigationUtils.formatLongitude(gps.longitude)
         binding.tvSpeed.text = "%.1f kt".format(gps.speedKnots)
         binding.tvBearing.text = "%.0f° %s".format(gps.bearing, NavigationUtils.bearingName(gps.bearing))
-        binding.compassView.setBearing(gps.bearing)
     }
 
     private fun updateNavigationPanel(state: com.marinenavigator.data.models.NavigationState) {
@@ -770,11 +804,15 @@ class MapFragment : Fragment() {
     override fun onResume() {
         super.onResume()
         if (::mapView.isInitialized) mapView.onResume()
+        rotationSensor?.let {
+            sensorManager?.registerListener(sensorListener, it, SensorManager.SENSOR_DELAY_UI)
+        }
     }
 
     override fun onPause() {
         super.onPause()
         if (::mapView.isInitialized) mapView.onPause()
+        sensorManager?.unregisterListener(sensorListener)
     }
 
     override fun onDestroyView() {
