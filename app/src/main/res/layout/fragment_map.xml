@@ -61,7 +61,7 @@
                     android:gravity="end" />
             </LinearLayout>
 
-            <!-- Fila 2: Velocidad, Brújula y Rumbo -->
+            <!-- Fila 2: Velocidad y Rumbo -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -79,12 +79,6 @@
                     android:textSize="22sp"
                     android:textStyle="bold" />
 
-                <com.marinenavigator.ui.map.CompassView
-                    android:id="@+id/compassView"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
-                    android:layout_marginHorizontal="8dp" />
-
                 <TextView
                     android:id="@+id/tvBearing"
                     android:layout_width="0dp"
@@ -96,6 +90,13 @@
                     android:textStyle="bold"
                     android:gravity="end" />
             </LinearLayout>
+
+            <!-- Fila 3: Brújula de cinta -->
+            <com.marinenavigator.ui.map.CompassTapeView
+                android:id="@+id/compassTapeView"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:layout_marginTop="6dp" />
 
         </LinearLayout>
     </androidx.cardview.widget.CardView>
