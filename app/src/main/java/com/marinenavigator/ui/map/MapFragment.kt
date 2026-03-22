@@ -497,6 +497,7 @@ class MapFragment : Fragment() {
     private fun setupButtons() {
         // Centrar en posición
         binding.fabCenter.setOnClickListener {
+            if (!::mapView.isInitialized) return@setOnClickListener
             followLocation = true
             locationOverlay.enableFollowLocation()
             locationOverlay.myLocation?.let {
@@ -537,10 +538,12 @@ class MapFragment : Fragment() {
         // Parar navegación
         binding.btnStopNav.setOnClickListener {
             viewModel.stopNavigation()
-            destinationMarker?.let { mapView.overlays.remove(it) }
-            routeOverlay?.let { mapView.overlays.remove(it) }
+            if (::mapView.isInitialized) {
+                destinationMarker?.let { mapView.overlays.remove(it) }
+                routeOverlay?.let { mapView.overlays.remove(it) }
+                mapView.invalidate()
+            }
             binding.navigationPanel.isVisible = false
-            mapView.invalidate()
         }
     }
 
@@ -610,6 +613,7 @@ class MapFragment : Fragment() {
 
         // Ruta marina calculada por Brouter
         viewModel.marineRoutePoints.observe(viewLifecycleOwner) { points ->
+            if (!::mapView.isInitialized) return@observe
             if (points.isNotEmpty()) {
                 drawMarineRoute(points)
             }
@@ -617,6 +621,7 @@ class MapFragment : Fragment() {
 
         // Puntos de pesca
         viewModel.fishingPoints.observe(viewLifecycleOwner) { points ->
+            if (!::mapView.isInitialized) return@observe
             fishingMarkers.forEach { mapView.overlays.remove(it) }
             fishingMarkers.clear()
             points.forEach { addFishingMarker(it) }
@@ -625,6 +630,7 @@ class MapFragment : Fragment() {
 
         // Waypoints
         viewModel.waypoints.observe(viewLifecycleOwner) { wps ->
+            if (!::mapView.isInitialized) return@observe
             waypointMarkers.forEach { mapView.overlays.remove(it) }
             waypointMarkers.clear()
             wps.forEach { addWaypointMarker(it) }
@@ -633,6 +639,7 @@ class MapFragment : Fragment() {
 
         // Track activo en el mapa (en tiempo real durante grabación)
         viewModel.currentTrackPoints.observe(viewLifecycleOwner) { points ->
+            if (!::mapView.isInitialized) return@observe
             drawLiveTrack(points.map { GeoPoint(it.latitude, it.longitude) })
         }
 
@@ -646,6 +653,7 @@ class MapFragment : Fragment() {
 
         // Alerta de fondeo
         viewModel.anchorAlarmConfig.observe(viewLifecycleOwner) { cfg ->
+            if (!::mapView.isInitialized) return@observe
             if (cfg.isActive) {
                 binding.btnAnchor.setColorFilter(Color.RED)
                 drawAnchorCircle(cfg.radiusMeters, GeoPoint(cfg.centerLat, cfg.centerLon))
