@@ -806,37 +806,25 @@ class MapFragment : Fragment() {
         val gps = viewModel.gpsData.value
         val c = center ?: if (gps.isValid) GeoPoint(gps.latitude, gps.longitude) else return
 
-        val fillPaint = Paint().apply {
-            color = Color.argb(70, 255, 60, 60)
-            style = Paint.Style.FILL
-            isAntiAlias = true
-        }
-        val strokePaint = Paint().apply {
-            color = Color.rgb(255, 40, 40)
-            style = Paint.Style.STROKE
-            strokeWidth = 5f
-            isAntiAlias = true
+        // Construir puntos del círculo como GeoPoints
+        val circlePoints = ArrayList<GeoPoint>(73)
+        for (i in 0..360 step 5) {
+            val angle = Math.toRadians(i.toDouble())
+            val dLat = (radiusMeters / 111320.0) * Math.cos(angle)
+            val dLon = (radiusMeters / (111320.0 * Math.cos(Math.toRadians(c.latitude)))) * Math.sin(angle)
+            circlePoints.add(GeoPoint(c.latitude + dLat, c.longitude + dLon))
         }
 
-        anchorCircleOverlay = object : Overlay() {
-            override fun draw(canvas: android.graphics.Canvas, mapView: MapView, shadow: Boolean) {
-                if (shadow) return
-                val proj = mapView.projection
-                val screenCenter = proj.toPixels(c, null)
-                // Calcular radio en píxeles usando un punto al norte
-                val northPoint = GeoPoint(c.latitude + radiusMeters / 111320.0, c.longitude)
-                val screenNorth = proj.toPixels(northPoint, null)
-                val radiusPx = Math.hypot(
-                    (screenNorth.x - screenCenter.x).toDouble(),
-                    (screenNorth.y - screenCenter.y).toDouble()
-                ).toFloat()
-                val cx = screenCenter.x.toFloat()
-                val cy = screenCenter.y.toFloat()
-                canvas.drawCircle(cx, cy, radiusPx, fillPaint)
-                canvas.drawCircle(cx, cy, radiusPx, strokePaint)
-            }
+        // Usar Polyline (funcionamiento probado con las rutas de navegación)
+        val circleLine = Polyline(mapView).apply {
+            setPoints(circlePoints)
+            outlinePaint.color = Color.rgb(255, 40, 40)
+            outlinePaint.strokeWidth = 8f
+            outlinePaint.isAntiAlias = true
+            outlinePaint.style = Paint.Style.STROKE
         }
-        mapView.overlays.add(anchorCircleOverlay!!)
+        anchorCircleOverlay = circleLine
+        mapView.overlays.add(circleLine)
 
         anchorMarkerOverlay = Marker(mapView).apply {
             position = c
