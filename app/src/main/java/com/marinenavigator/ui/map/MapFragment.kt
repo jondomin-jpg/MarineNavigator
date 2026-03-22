@@ -386,8 +386,7 @@ class MapFragment : Fragment() {
             "Navegar aquí",
             "Establecer como origen de ruta",
             "Guardar como waypoint",
-            "Guardar punto de pesca",
-            "Establecer fondeo aquí"
+            "Guardar punto de pesca"
         )
         MaterialAlertDialogBuilder(requireContext())
             .setTitle("%.5f, %.5f".format(point.latitude, point.longitude))
@@ -409,7 +408,6 @@ class MapFragment : Fragment() {
                     }
                     2 -> showSaveWaypointDialog(point)
                     3 -> showSaveFishingPointDialog(point)
-                    4 -> showAnchorAlarmDialog(point)
                 }
             }
             .show()
