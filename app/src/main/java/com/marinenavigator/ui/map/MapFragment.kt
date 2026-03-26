@@ -153,9 +153,8 @@ class MapFragment : Fragment() {
         rotationOverlay.isEnabled = true
         mapView.overlays.add(rotationOverlay)
 
-        // Overlay de marcas náuticas OpenSeaMap (boyas, luces, puertos) + curvas batimétricas
-        addNauticalChartOverlay()
-        addDefaultDepthContours()
+        // Batimetría coloreada (GEBCO) + curvas EMODnet + marcas náuticas OpenSeaMap
+        addBathymetryAndHazardOverlays()
 
         // Indicador de Norte: View fija en el layout, se actualiza con mapView.mapOrientation
         binding.northMapCompass.setBearing(0f)
