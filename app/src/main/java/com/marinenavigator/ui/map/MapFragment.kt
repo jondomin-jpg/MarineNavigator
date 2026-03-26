@@ -262,8 +262,8 @@ class MapFragment : Fragment() {
             mapView.overlays.add(overlay)
         }
 
-        addOverlay(buildEmodnetOverlay("mean_atlas_land"))  // azules degradados estilo OpenSeaMap
-        addOverlay(buildEmodnetOverlay("contours"))         // isobaras de profundidad
+        addOverlay(buildEmodnetOverlay("mean_rainbowcolour"))  // colores de profundidad solo en mar, transparente en tierra
+        addOverlay(buildEmodnetOverlay("contours"))             // isobaras de profundidad
         // Los puertos y faros se cargan dinámicamente en loadPortsAndLighthouses()
     }
 
