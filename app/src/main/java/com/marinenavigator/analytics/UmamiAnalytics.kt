@@ -21,8 +21,8 @@ import java.net.URL
 object UmamiAnalytics {
 
     // ── CONFIGURA ESTOS DOS VALORES ───────────────────────────
-    private const val SERVER_URL = "https://YOUR_UMAMI_URL"   // ej: https://analytics.tudominio.com
-    private const val WEBSITE_ID = "YOUR_WEBSITE_ID"          // ej: a1b2c3d4-e5f6-...
+    private const val SERVER_URL = "https://cloud.umami.is"
+    private const val WEBSITE_ID = "87ac16dc-e220-4c17-b6af-d17cd0abe41e"
     // ─────────────────────────────────────────────────────────
 
     private val scope = CoroutineScope(Dispatchers.IO)
