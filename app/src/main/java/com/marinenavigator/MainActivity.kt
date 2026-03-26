@@ -5,8 +5,8 @@ import android.view.WindowManager
 import androidx.appcompat.app.AppCompatActivity
 import androidx.navigation.fragment.NavHostFragment
 import androidx.navigation.ui.setupWithNavController
+import com.marinenavigator.analytics.UmamiAnalytics
 import com.marinenavigator.databinding.ActivityMainBinding
-import timber.log.Timber
 
 class MainActivity : AppCompatActivity() {
 
@@ -21,7 +21,7 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        if (BuildConfig.DEBUG) Timber.plant(Timber.DebugTree())
+        UmamiAnalytics.track(UmamiAnalytics.Event.APP_OPEN)
 
         // Navigation component
         val navHostFragment = supportFragmentManager

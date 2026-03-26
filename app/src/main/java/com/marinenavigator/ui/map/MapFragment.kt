@@ -25,6 +25,7 @@ import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.TextInputEditText
 import com.marinenavigator.R
+import com.marinenavigator.analytics.UmamiAnalytics
 import com.marinenavigator.data.models.FishingPoint
 import com.marinenavigator.data.models.Waypoint
 import com.marinenavigator.databinding.FragmentMapBinding
@@ -432,6 +433,7 @@ class MapFragment : Fragment() {
                 // Calcular ruta marina evitando tierra
                 Toast.makeText(context, "Calculando ruta marina...", Toast.LENGTH_SHORT).show()
                 viewModel.calculateMarineRoute(point.latitude, point.longitude)
+                UmamiAnalytics.track(UmamiAnalytics.Event.ROUTE_CALCULATED)
             }
             .setNegativeButton("Cancelar", null)
             .show()
@@ -450,6 +452,7 @@ class MapFragment : Fragment() {
             .setPositiveButton("Guardar") { _, _ ->
                 val name = editText.text.toString().ifBlank { "WP ${System.currentTimeMillis() / 1000}" }
                 viewModel.saveWaypoint(name, point.latitude, point.longitude)
+                UmamiAnalytics.track(UmamiAnalytics.Event.WAYPOINT_SAVED)
                 Toast.makeText(context, "Waypoint '$name' guardado", Toast.LENGTH_SHORT).show()
                 addWaypointMarker(Waypoint(name = name, latitude = point.latitude, longitude = point.longitude))
             }
@@ -470,6 +473,7 @@ class MapFragment : Fragment() {
             .setPositiveButton("Guardar") { _, _ ->
                 val name = editText.text.toString().ifBlank { "Pesca ${System.currentTimeMillis() / 1000}" }
                 viewModel.saveFishingPoint(name, point.latitude, point.longitude)
+                UmamiAnalytics.track(UmamiAnalytics.Event.FISHING_POINT_SAVED)
                 Toast.makeText(context, "Punto de pesca '$name' guardado", Toast.LENGTH_SHORT).show()
                 addFishingMarker(FishingPoint(name = name, latitude = point.latitude, longitude = point.longitude))
             }
@@ -486,6 +490,7 @@ class MapFragment : Fragment() {
                 val radiusInput = view.findViewById<TextInputEditText>(R.id.etRadius)
                 val radius = radiusInput.text.toString().toDoubleOrNull() ?: 50.0
                 viewModel.activateAnchorAlarm(radius)
+                UmamiAnalytics.track(UmamiAnalytics.Event.ANCHOR_ALARM_ON)
                 Toast.makeText(context, "Alerta de fondeo activada (${radius.toInt()} m)", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Cancelar", null)
@@ -516,6 +521,7 @@ class MapFragment : Fragment() {
         binding.fabRecord.setOnClickListener {
             if (viewModel.isRecording.value) {
                 viewModel.stopRecording()
+                UmamiAnalytics.track(UmamiAnalytics.Event.TRACK_STOPPED)
                 binding.fabRecord.setImageResource(R.drawable.ic_record)
                 binding.recordingIndicator.isVisible = false
                 Toast.makeText(context, "Ruta guardada", Toast.LENGTH_SHORT).show()
@@ -528,6 +534,7 @@ class MapFragment : Fragment() {
         binding.btnAnchor.setOnClickListener {
             if (viewModel.anchorAlarmConfig.value?.isActive == true) {
                 viewModel.deactivateAnchorAlarm()
+                UmamiAnalytics.track(UmamiAnalytics.Event.ANCHOR_ALARM_OFF)
                 clearAnchorCircle()
                 binding.btnAnchor.setColorFilter(Color.WHITE)
                 Toast.makeText(context, "Alerta de fondeo desactivada", Toast.LENGTH_SHORT).show()
@@ -561,6 +568,7 @@ class MapFragment : Fragment() {
             .setPositiveButton("Iniciar") { _, _ ->
                 val name = editText.text.toString()
                 viewModel.startRecording(name)
+                UmamiAnalytics.track(UmamiAnalytics.Event.TRACK_STARTED)
                 binding.fabRecord.setImageResource(R.drawable.ic_stop)
                 binding.recordingIndicator.isVisible = true
             }
