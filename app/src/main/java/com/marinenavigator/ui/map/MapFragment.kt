@@ -145,8 +145,8 @@ class MapFragment : Fragment() {
         mapView.setMultiTouchControls(true)
         mapView.controller.setZoom(14.0)
 
-        // Base: OpenStreetMap (fiable, sin API key)
-        mapView.setTileSource(TileSourceFactory.MAPNIK)
+        // Base: ESRI Ocean (batimetría coloreada integrada, sin API key)
+        mapView.setTileSource(createEsriOceanSource())
 
         // Overlay de rotación de mapa
         val rotationOverlay = RotationGestureOverlay(mapView)
@@ -270,6 +270,19 @@ class MapFragment : Fragment() {
         mapView.overlays.add(contourOverlay)
     }
 
+    // Fuente ESRI Ocean Base — batimetría coloreada por profundidad (sin API key)
+    private fun createEsriOceanSource() = object : OnlineTileSourceBase(
+        "ESRIOcean", 2, 19, 256, ".jpg",
+        arrayOf("https://services.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/")
+    ) {
+        override fun getTileURLString(pMapTileIndex: Long): String {
+            val z = MapTileIndex.getZoom(pMapTileIndex)
+            val x = MapTileIndex.getX(pMapTileIndex)
+            val y = MapTileIndex.getY(pMapTileIndex)
+            return "$baseUrl$z/$y/$x"  // ESRI usa z/y/x
+        }
+    }
+
     // Fuente de tiles de satélite (Google) con URL correcta
     private fun createSatelliteSource() = object : OnlineTileSourceBase(
         "GoogleSat", 2, 20, 256, ".jpg",
@@ -287,35 +300,8 @@ class MapFragment : Fragment() {
         }
     }
 
-    // Capa de batimetría GEBCO (WMS oficial) + curvas EMODnet + peligros náuticos
+    // Curvas EMODnet + marcas náuticas sobre el fondo ESRI Ocean coloreado
     private fun addBathymetryAndHazardOverlays() {
-        // GEBCO WMS oficial — profundidades oceánicas globales como mapa de colores
-        val gebcoSource = object : OnlineTileSourceBase(
-            "GEBCO_WMS", 2, 14, 256, ".png",
-            arrayOf("https://www.gebco.net/data_and_products/gebco_web_services/web_map_service/mapserv")
-        ) {
-            override fun getTileURLString(pMapTileIndex: Long): String {
-                val z = MapTileIndex.getZoom(pMapTileIndex).toInt()
-                val x = MapTileIndex.getX(pMapTileIndex)
-                val y = MapTileIndex.getY(pMapTileIndex)
-                val n = Math.pow(2.0, z.toDouble())
-                val minLon = x / n * 360.0 - 180.0
-                val maxLon = (x + 1) / n * 360.0 - 180.0
-                val maxLat = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))))
-                val minLat = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 1) / n))))
-                val bbox = "$minLon,$minLat,$maxLon,$maxLat"
-                return "$baseUrl?service=WMS&request=GetMap&version=1.1.1" +
-                    "&layers=GEBCO_LATEST&styles=&format=image/png&transparent=true" +
-                    "&SRS=EPSG:4326&bbox=$bbox&width=256&height=256"
-            }
-        }
-        val gebcoOverlay = TilesOverlay(
-            org.osmdroid.tileprovider.MapTileProviderBasic(context, gebcoSource), context
-        )
-        gebcoOverlay.loadingBackgroundColor = Color.TRANSPARENT
-        gebcoOverlay.loadingLineColor = Color.TRANSPARENT
-        mapView.overlays.add(gebcoOverlay)
-
         // EMODnet Bathymetry WMS — curvas batimétricas (isobaras de profundidad) para aguas europeas
         val emodnetSource = object : OnlineTileSourceBase(
             "EMODnet_Contours", 3, 18, 256, ".png",
@@ -589,7 +575,7 @@ class MapFragment : Fragment() {
                 mapView.overlays.add(rot)
 
                 when (which) {
-                    0 -> { mapView.setTileSource(TileSourceFactory.MAPNIK); addBathymetryAndHazardOverlays() }
+                    0 -> { mapView.setTileSource(createEsriOceanSource()); addBathymetryAndHazardOverlays() }
                     1 -> { mapView.setTileSource(createSatelliteSource()); addBathymetryAndHazardOverlays() }
                 }
                 restoreNonTileOverlays()
