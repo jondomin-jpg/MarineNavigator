@@ -31,9 +31,21 @@ import com.marinenavigator.data.models.Waypoint
 import com.marinenavigator.databinding.FragmentMapBinding
 import com.marinenavigator.services.NavigationService
 import com.marinenavigator.utils.NavigationUtils
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapEventsReceiver
+import org.osmdroid.events.MapListener
+import org.osmdroid.events.ScrollEvent
+import org.osmdroid.events.ZoomEvent
+import timber.log.Timber
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
 import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
@@ -60,6 +72,9 @@ class MapFragment : Fragment() {
     private var anchorMarkerOverlay: Marker? = null
     private val fishingMarkers = mutableListOf<Marker>()
     private val waypointMarkers = mutableListOf<Marker>()
+    private val portMarkers = mutableListOf<Marker>()
+    private var portLoadJob: Job? = null
+    private var lastPortBbox = ""
     private var followLocation = true
     private var showNauticalCharts = true
     private var mapEventsOverlay: MapEventsOverlay? = null
@@ -188,6 +203,13 @@ class MapFragment : Fragment() {
         }
         mapView.overlays.add(scaleBarOverlay!!)
 
+        // Recargar puertos/faros al mover el mapa
+        mapView.addMapListener(object : MapListener {
+            override fun onScroll(event: ScrollEvent): Boolean { loadPortsAndLighthouses(); return false }
+            override fun onZoom(event: ZoomEvent): Boolean { loadPortsAndLighthouses(); return false }
+        })
+        loadPortsAndLighthouses()
+
         mapView.invalidate()
     }
 
@@ -242,29 +264,13 @@ class MapFragment : Fragment() {
 
         addOverlay(buildEmodnetOverlay("mean_atlas_land"))  // azules degradados estilo OpenSeaMap
         addOverlay(buildEmodnetOverlay("contours"))         // isobaras de profundidad
-
-        // OpenSeaMap — marcas de navegación (boyas, luces, peligros puntuales)
-        val openSeaMapSource = object : OnlineTileSourceBase(
-            "OpenSeaMap", 3, 18, 256, ".png",
-            arrayOf("https://tiles.openseamap.org/seamark/")
-        ) {
-            override fun getTileURLString(pMapTileIndex: Long): String =
-                baseUrl +
-                    MapTileIndex.getZoom(pMapTileIndex) + "/" +
-                    MapTileIndex.getX(pMapTileIndex) + "/" +
-                    MapTileIndex.getY(pMapTileIndex) + mImageFilenameEnding
-        }
-        val seamarkOverlay = TilesOverlay(
-            org.osmdroid.tileprovider.MapTileProviderBasic(context, openSeaMapSource), context
-        )
-        seamarkOverlay.loadingBackgroundColor = Color.TRANSPARENT
-        seamarkOverlay.loadingLineColor = Color.TRANSPARENT
-        mapView.overlays.add(seamarkOverlay)
+        // Los puertos y faros se cargan dinámicamente en loadPortsAndLighthouses()
     }
 
     // Restaura todos los overlays no-tile tras cambiar capa base
     private fun restoreNonTileOverlays() {
         mapView.overlays.add(locationOverlay)
+        portMarkers.forEach { mapView.overlays.add(it) }
         fishingMarkers.forEach { mapView.overlays.add(it) }
         waypointMarkers.forEach { mapView.overlays.add(it) }
         routeOverlay?.let { mapView.overlays.add(it) }
@@ -276,6 +282,94 @@ class MapFragment : Fragment() {
         mapEventsOverlay?.let { mapView.overlays.add(it) }
         scaleBarOverlay?.let { mapView.overlays.add(it) }
         mapView.invalidate()
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // PUERTOS Y FAROS — carga dinámica desde Overpass API
+    // ─────────────────────────────────────────────────────────
+    private fun loadPortsAndLighthouses() {
+        portLoadJob?.cancel()
+        portLoadJob = viewLifecycleOwner.lifecycleScope.launch {
+            delay(700)  // debounce: esperar a que deje de hacer scroll
+            val bb = mapView.boundingBox ?: return@launch
+            if (mapView.zoomLevelDouble < 7.0) return@launch
+            val key = "%.2f,%.2f,%.2f,%.2f".format(bb.latSouth, bb.lonWest, bb.latNorth, bb.lonEast)
+            if (key == lastPortBbox) return@launch
+            lastPortBbox = key
+            val markers = try {
+                fetchPortsAndLighthouses(bb.latSouth, bb.lonWest, bb.latNorth, bb.lonEast)
+            } catch (e: Exception) {
+                Timber.w(e, "Error cargando puertos/faros"); return@launch
+            }
+            portMarkers.forEach { mapView.overlays.remove(it) }
+            portMarkers.clear()
+            portMarkers.addAll(markers)
+            markers.forEach { mapView.overlays.add(it) }
+            mapView.invalidate()
+        }
+    }
+
+    private suspend fun fetchPortsAndLighthouses(
+        south: Double, west: Double, north: Double, east: Double
+    ): List<Marker> = withContext(Dispatchers.IO) {
+        val bbox = "$south,$west,$north,$east"
+        val query = """
+            [out:json][timeout:20];
+            (
+              node["amenity"="harbour"]($bbox);
+              node["seamark:type"="harbour"]($bbox);
+              node["seamark:type"="light_major"]($bbox);
+              node["seamark:type"="light_minor"]($bbox);
+              way["amenity"="harbour"]($bbox);
+            );
+            out center;
+        """.trimIndent()
+        val encoded = URLEncoder.encode(query, "UTF-8")
+        val conn = URL("https://overpass-api.de/api/interpreter?data=$encoded")
+            .openConnection() as HttpURLConnection
+        conn.connectTimeout = 15_000
+        conn.readTimeout    = 25_000
+        conn.setRequestProperty("User-Agent", "MarineNavigator/1.0")
+        val markers = mutableListOf<Marker>()
+        try {
+            val root = JSONObject(conn.inputStream.bufferedReader().readText())
+            val elements = root.getJSONArray("elements")
+            for (i in 0 until elements.length()) {
+                val el   = elements.getJSONObject(i)
+                val lat  = if (el.has("lat")) el.getDouble("lat")
+                           else el.optJSONObject("center")?.getDouble("lat") ?: continue
+                val lon  = if (el.has("lon")) el.getDouble("lon")
+                           else el.optJSONObject("center")?.getDouble("lon") ?: continue
+                val tags = el.optJSONObject("tags")
+                val name = tags?.optString("name", "") ?: ""
+                val smt  = tags?.optString("seamark:type", "") ?: ""
+                val isLight = smt in listOf("light_major", "light_minor")
+                val isPort  = smt == "harbour" || (tags?.optString("amenity", "") == "harbour")
+                if (!isLight && !isPort) continue
+                markers += Marker(mapView).apply {
+                    position = GeoPoint(lat, lon)
+                    title    = name.ifEmpty { if (isLight) "Faro" else "Puerto" }
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                    icon = makeMarkerIcon(if (isLight) Color.YELLOW else Color.CYAN)
+                }
+            }
+        } finally { conn.disconnect() }
+        markers
+    }
+
+    private fun makeMarkerIcon(colorInt: Int): BitmapDrawable {
+        val px  = (16 * resources.displayMetrics.density).toInt().coerceAtLeast(16)
+        val bmp = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
+        val cv  = android.graphics.Canvas(bmp)
+        val sw  = px * 0.18f
+        val fill   = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = colorInt }
+        val border = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE; style = Paint.Style.STROKE; strokeWidth = sw
+        }
+        val r = px / 2f
+        cv.drawCircle(r, r, r - sw, fill)
+        cv.drawCircle(r, r, r - sw, border)
+        return BitmapDrawable(resources, bmp)
     }
 
     // ─────────────────────────────────────────────────────────
