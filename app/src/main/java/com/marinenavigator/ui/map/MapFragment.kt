@@ -262,8 +262,8 @@ class MapFragment : Fragment() {
             mapView.overlays.add(overlay)
         }
 
-        addOverlay(buildEmodnetOverlay("mean"))      // gradiente azul de profundidad, transparente en tierra
-        addOverlay(buildEmodnetOverlay("contours"))  // isobaras de profundidad
+        addOverlay(buildEmodnetOverlay("mean_multicolour"))  // profundidad coloreada, transparente en tierra
+        addOverlay(buildEmodnetOverlay("contours"))         // isobaras de profundidad
 
         // OpenSeaMap seamark — balizas, luces, sectores, puertos, etc. (igual que openseamap.org)
         val openSeaMapSource = object : OnlineTileSourceBase(

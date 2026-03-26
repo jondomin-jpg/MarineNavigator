@@ -25,7 +25,7 @@ object MarineRouter {
     private const val GRID_N          = 400   // resolución cuadrícula 400×400
     private const val PADDING         = 0.15  // grados de margen
     private const val HAZARD_BUFFER   = 2     // celdas de seguridad alrededor de cada peligro puntual
-    private const val COAST_BUFFER    = 2     // celdas de buffer alrededor de los segmentos de costa (muro sólido)
+    private const val COAST_BUFFER    = 1     // 1 celda (~120m) — evita bloquear entradas de puertos/rías estrechas
     private const val RDP_EPSILON     = 0.0008 // umbral de simplificación Ramer-Douglas-Peucker (~80 m)
     private const val MIN_SAFE_DEPTH  = 3.0   // metros mínimos de profundidad navegable
 
@@ -359,7 +359,7 @@ object MarineRouter {
         // Si origen/destino están en zona bloqueada, buscar celda libre más cercana
         fun nearestFree(cell: Cell): Cell {
             if (!grid[cell.row][cell.col]) return cell
-            for (r in 1..40) {
+            for (r in 1..80) {
                 for (dr in -r..r) for (dc in -r..r) {
                     val nr = cell.row + dr; val nc = cell.col + dc
                     if (nr in 0 until GRID_N && nc in 0 until GRID_N && !grid[nr][nc])
