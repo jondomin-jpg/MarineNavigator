@@ -302,6 +302,26 @@ object MarineRouter {
 
         val sea = Array(GRID_N) { BooleanArray(GRID_N) }
         val queue = ArrayDeque<Int>()
+
+        // Semillas desde los 4 bordes del grid: el bbox incluye PADDING=0.15° de margen,
+        // por lo que cualquier celda libre en el borde está casi garantizada en mar abierto.
+        // Esto conecta ambos lados de un cabo aunque ninguna semilla puntual los alcance.
+        for (col in 0 until GRID_N) {
+            for (row in intArrayOf(0, GRID_N - 1)) {
+                if (!walls[row][col] && !sea[row][col]) {
+                    sea[row][col] = true; queue.add(row * GRID_N + col)
+                }
+            }
+        }
+        for (row in 1 until GRID_N - 1) {
+            for (col in intArrayOf(0, GRID_N - 1)) {
+                if (!walls[row][col] && !sea[row][col]) {
+                    sea[row][col] = true; queue.add(row * GRID_N + col)
+                }
+            }
+        }
+
+        // Semillas puntuales: origen, destino y centro del bbox
         for ((seedLat, seedLon) in candidateSeeds) {
             val seed = nearestFreeCell(seedLat, seedLon) ?: continue
             if (!sea[seed.first][seed.second]) {
@@ -354,7 +374,7 @@ object MarineRouter {
         // Si origen/destino están en zona bloqueada, buscar celda libre más cercana
         fun nearestFree(cell: Cell): Cell {
             if (!grid[cell.row][cell.col]) return cell
-            for (r in 1..5) {
+            for (r in 1..40) {
                 for (dr in -r..r) for (dc in -r..r) {
                     val nr = cell.row + dr; val nc = cell.col + dc
                     if (nr in 0 until GRID_N && nc in 0 until GRID_N && !grid[nr][nc])
