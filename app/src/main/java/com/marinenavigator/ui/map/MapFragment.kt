@@ -232,27 +232,29 @@ class MapFragment : Fragment() {
 
     // Batimetría coloreada EMODnet + curvas + marcas náuticas
     private fun addBathymetryAndHazardOverlays() {
-        // EMODnet mean_multicolour — profundidades coloreadas por rango (aguas europeas)
-        fun buildEmodnetOverlay(layer: String) = object : OnlineTileSourceBase(
-            "EMODnet_$layer", 3, 18, 256, ".png",
-            arrayOf("https://ows.emodnet-bathymetry.eu/wms")
-        ) {
-            override fun getTileURLString(pMapTileIndex: Long): String {
-                val z = MapTileIndex.getZoom(pMapTileIndex).toInt()
-                val x = MapTileIndex.getX(pMapTileIndex)
-                val y = MapTileIndex.getY(pMapTileIndex)
-                val n = Math.pow(2.0, z.toDouble())
-                val minLon = x / n * 360.0 - 180.0
-                val maxLon = (x + 1) / n * 360.0 - 180.0
-                val maxLat = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))))
-                val minLat = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 1) / n))))
-                val bbox = "$minLon,$minLat,$maxLon,$maxLat"
-                return "$baseUrl?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap" +
-                    "&LAYERS=emodnet:$layer&STYLES=&SRS=EPSG:4326" +
-                    "&BBOX=$bbox&WIDTH=256&HEIGHT=256" +
-                    "&FORMAT=image/png&TRANSPARENT=TRUE"
+        // layer: nombre del layer EMODnet; styles/extra: parámetros WMS adicionales
+        fun buildEmodnetOverlay(layer: String, styles: String = "", extra: String = "") =
+            object : OnlineTileSourceBase(
+                "EMODnet_$layer", 3, 18, 256, ".png",
+                arrayOf("https://ows.emodnet-bathymetry.eu/wms")
+            ) {
+                override fun getTileURLString(pMapTileIndex: Long): String {
+                    val z = MapTileIndex.getZoom(pMapTileIndex).toInt()
+                    val x = MapTileIndex.getX(pMapTileIndex)
+                    val y = MapTileIndex.getY(pMapTileIndex)
+                    val n = Math.pow(2.0, z.toDouble())
+                    val minLon = x / n * 360.0 - 180.0
+                    val maxLon = (x + 1) / n * 360.0 - 180.0
+                    val maxLat = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))))
+                    val minLat = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 1) / n))))
+                    val bbox = "$minLon,$minLat,$maxLon,$maxLat"
+                    return "$baseUrl?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap" +
+                        "&LAYERS=emodnet:$layer&STYLES=$styles&SRS=EPSG:4326" +
+                        "&BBOX=$bbox&WIDTH=256&HEIGHT=256" +
+                        "&FORMAT=image/png&TRANSPARENT=TRUE" +
+                        (if (extra.isNotEmpty()) "&$extra" else "")
+                }
             }
-        }
         fun addOverlay(source: OnlineTileSourceBase) {
             val overlay = TilesOverlay(
                 org.osmdroid.tileprovider.MapTileProviderBasic(context, source), context
@@ -262,8 +264,10 @@ class MapFragment : Fragment() {
             mapView.overlays.add(overlay)
         }
 
-        addOverlay(buildEmodnetOverlay("mean_multicolour"))  // profundidad coloreada, transparente en tierra
-        addOverlay(buildEmodnetOverlay("contours"))         // isobaras de profundidad
+        // Gradiente azul océano (boxfill/occam = paleta ncWMS, azul claro→oscuro por profundidad)
+        // COLORSCALERANGE=-6000,0 → tierra sin datos = transparente
+        addOverlay(buildEmodnetOverlay("mean", "boxfill/occam", "COLORSCALERANGE=-6000,0"))
+        addOverlay(buildEmodnetOverlay("contours"))  // isobaras de profundidad
 
         // OpenSeaMap seamark — balizas, luces, sectores, puertos, etc. (igual que openseamap.org)
         val openSeaMapSource = object : OnlineTileSourceBase(

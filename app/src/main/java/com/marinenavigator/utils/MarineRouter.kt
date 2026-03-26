@@ -79,15 +79,19 @@ object MarineRouter {
         val hazardAreas:   List<List<Pair<LatLon, LatLon>>>    // arrecifes / bajos como polígono
     )
 
+    // Servidores Overpass en orden de preferencia
+    private val OVERPASS_MIRRORS = listOf(
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://overpass.openstreetmap.fr/api/interpreter"
+    )
+
     private fun fetchAllHazards(
         south: Double, west: Double, north: Double, east: Double
     ): HazardData {
         val bbox = "$south,$west,$north,$east"
-        // Consulta simplificada: solo costas y peligros puntuales esenciales.
-        // Se eliminan relations y la mayoría de way-hazards porque son muy lentos
-        // y hacen que la consulta supere el timeout, causando fallback a línea recta.
         val query = """
-            [out:json][timeout:25];
+            [out:json][timeout:20];
             (
               way["natural"="coastline"]($bbox);
               way["natural"="reef"]($bbox);
@@ -98,12 +102,25 @@ object MarineRouter {
             );
             out geom qt;
         """.trimIndent()
-
         val encoded = URLEncoder.encode(query, "UTF-8")
-        val conn = URL("https://overpass-api.de/api/interpreter?data=$encoded")
-            .openConnection() as HttpURLConnection
-        conn.connectTimeout = 20_000
-        conn.readTimeout    = 30_000
+
+        // Reintentar con cada mirror hasta obtener datos válidos
+        for (mirror in OVERPASS_MIRRORS) {
+            try {
+                val result = fetchFromEndpoint("$mirror?data=$encoded")
+                if (result != null) return result
+            } catch (e: Exception) {
+                Timber.w(e, "Overpass mirror failed: $mirror")
+            }
+        }
+        Timber.e("Todos los servidores Overpass fallaron para bbox $bbox")
+        return HazardData(emptyList(), emptyList(), emptyList())
+    }
+
+    private fun fetchFromEndpoint(url: String): HazardData? {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        conn.connectTimeout = 15_000
+        conn.readTimeout    = 25_000
         conn.setRequestProperty("User-Agent", "MarineNavigator/1.0")
 
         val coastSegments = mutableListOf<Pair<LatLon, LatLon>>()
@@ -112,7 +129,8 @@ object MarineRouter {
 
         return try {
             val root     = JSONObject(conn.inputStream.bufferedReader().readText())
-            val elements = root.getJSONArray("elements")
+            // Overpass devuelve error sin "elements" cuando hay timeout o servidor ocupado
+            val elements = root.optJSONArray("elements") ?: return null
 
             for (i in 0 until elements.length()) {
                 val el   = elements.getJSONObject(i)
@@ -188,7 +206,7 @@ object MarineRouter {
         } finally {
             conn.disconnect()
         }
-    }
+    }  // fetchFromEndpoint
 
     // ─────────────────────────────────────────────────────────
     // Construir cuadrícula combinando tierra + peligros
