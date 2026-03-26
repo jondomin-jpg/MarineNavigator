@@ -240,8 +240,8 @@ class MapFragment : Fragment() {
             mapView.overlays.add(overlay)
         }
 
-        addOverlay(buildEmodnetOverlay("mean_multicolour"))  // colores de profundidad
-        addOverlay(buildEmodnetOverlay("contours"))          // isobaras
+        addOverlay(buildEmodnetOverlay("mean_atlas_land"))  // azules degradados estilo OpenSeaMap
+        addOverlay(buildEmodnetOverlay("contours"))         // isobaras de profundidad
 
         // OpenSeaMap — marcas de navegación (boyas, luces, peligros puntuales)
         val openSeaMapSource = object : OnlineTileSourceBase(
