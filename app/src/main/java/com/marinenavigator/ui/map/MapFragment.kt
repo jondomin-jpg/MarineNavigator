@@ -262,8 +262,8 @@ class MapFragment : Fragment() {
             mapView.overlays.add(overlay)
         }
 
-        addOverlay(buildEmodnetOverlay("mean_rainbowcolour"))  // colores de profundidad solo en mar, transparente en tierra
-        addOverlay(buildEmodnetOverlay("contours"))             // isobaras de profundidad
+        addOverlay(buildEmodnetOverlay("mean"))      // gradiente azul de profundidad, transparente en tierra
+        addOverlay(buildEmodnetOverlay("contours"))  // isobaras de profundidad
         // Los puertos y faros se cargan dinámicamente en loadPortsAndLighthouses()
     }
 
@@ -341,14 +341,33 @@ class MapFragment : Fragment() {
                 val lon  = if (el.has("lon")) el.getDouble("lon")
                            else el.optJSONObject("center")?.getDouble("lon") ?: continue
                 val tags = el.optJSONObject("tags")
-                val name = tags?.optString("name", "") ?: ""
-                val smt  = tags?.optString("seamark:type", "") ?: ""
+                fun tag(vararg keys: String) = keys.mapNotNull {
+                    tags?.optString(it)?.takeIf { v -> v.isNotEmpty() && v != "null" }
+                }.firstOrNull() ?: ""
+                val smt     = tag("seamark:type")
                 val isLight = smt in listOf("light_major", "light_minor")
-                val isPort  = smt == "harbour" || (tags?.optString("amenity", "") == "harbour")
+                val isPort  = smt == "harbour" || tag("amenity") == "harbour"
                 if (!isLight && !isPort) continue
+                val name = tag("name", "seamark:name", "seamark:light_major:name",
+                                "seamark:light_minor:name", "official_name")
+                val title = when {
+                    name.isNotEmpty() -> name
+                    isLight -> {
+                        val ch = tag("seamark:light:character", "light:character")
+                        if (ch.isNotEmpty()) "Faro ($ch)" else "Faro"
+                    }
+                    else -> tag("seamark:harbour:name").ifEmpty { "Puerto" }
+                }
+                val snippet = if (isLight) {
+                    listOfNotNull(
+                        tag("seamark:light:range").takeIf { it.isNotEmpty() }?.let { "Alcance: ${it}nm" },
+                        tag("seamark:light:period").takeIf { it.isNotEmpty() }?.let { "Periodo: ${it}s" }
+                    ).joinToString(" · ").ifEmpty { null }
+                } else null
                 markers += Marker(mapView).apply {
-                    position = GeoPoint(lat, lon)
-                    title    = name.ifEmpty { if (isLight) "Faro" else "Puerto" }
+                    position    = GeoPoint(lat, lon)
+                    this.title   = title
+                    this.snippet = snippet
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                     icon = makeMarkerIcon(if (isLight) Color.YELLOW else Color.CYAN)
                 }

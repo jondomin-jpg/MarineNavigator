@@ -83,42 +83,27 @@ object MarineRouter {
         south: Double, west: Double, north: Double, east: Double
     ): HazardData {
         val bbox = "$south,$west,$north,$east"
-        // Una sola consulta que obtiene todos los elementos relevantes
+        // Consulta simplificada: solo costas y peligros puntuales esenciales.
+        // Se eliminan relations y la mayoría de way-hazards porque son muy lentos
+        // y hacen que la consulta supere el timeout, causando fallback a línea recta.
         val query = """
-            [out:json][timeout:55];
+            [out:json][timeout:25];
             (
               way["natural"="coastline"]($bbox);
               way["natural"="reef"]($bbox);
-              way["natural"="shoal"]($bbox);
-              way["natural"="mud"]($bbox);
-              node["natural"="reef"]($bbox);
-              node["natural"="shoal"]($bbox);
               node["seamark:type"="rock_awash"]($bbox);
               node["seamark:type"="rock_submerged"]($bbox);
               node["seamark:type"="rock"]($bbox);
               node["seamark:type"="underwater_rock"]($bbox);
-              node["seamark:type"="obstruction"]($bbox);
-              node["seamark:type"="wreck"]($bbox);
-              node["seamark:type"="snag"]($bbox);
-              node["seamark:type"="foul_ground"]($bbox);
-              node["seamark:type"="shoal"]($bbox);
-              way["seamark:type"="obstruction"]($bbox);
-              way["seamark:type"="wreck"]($bbox);
-              way["seamark:type"="rock_awash"]($bbox);
-              way["seamark:type"="underwater_rock"]($bbox);
-              way["seamark:type"="foul_ground"]($bbox);
-              way["seamark:type"="shoal"]($bbox);
-              way["seamark:type"="depth_area"]($bbox);
-              relation["seamark:type"="depth_area"]($bbox);
             );
-            out geom;
+            out geom qt;
         """.trimIndent()
 
         val encoded = URLEncoder.encode(query, "UTF-8")
         val conn = URL("https://overpass-api.de/api/interpreter?data=$encoded")
             .openConnection() as HttpURLConnection
-        conn.connectTimeout = 25_000
-        conn.readTimeout    = 60_000
+        conn.connectTimeout = 20_000
+        conn.readTimeout    = 30_000
         conn.setRequestProperty("User-Agent", "MarineNavigator/1.0")
 
         val coastSegments = mutableListOf<Pair<LatLon, LatLon>>()
