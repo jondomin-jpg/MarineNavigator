@@ -145,8 +145,8 @@ class MapFragment : Fragment() {
         mapView.setMultiTouchControls(true)
         mapView.controller.setZoom(14.0)
 
-        // Base: ESRI Ocean (batimetría coloreada integrada, sin API key)
-        mapView.setTileSource(createEsriOceanSource())
+        // Base: OpenStreetMap
+        mapView.setTileSource(TileSourceFactory.MAPNIK)
 
         // Overlay de rotación de mapa
         val rotationOverlay = RotationGestureOverlay(mapView)
@@ -191,98 +191,6 @@ class MapFragment : Fragment() {
         mapView.invalidate()
     }
 
-    private fun addNauticalChartOverlay() {
-        // Capa 1: IHM — Cartas náuticas ENC oficiales (Instituto Hidrográfico de la Marina)
-        // WMS: http://ideihm.covam.es/wms/cartaENCp5
-        val ihmWmsSource = object : OnlineTileSourceBase(
-            "IHM_ENC", 3, 18, 256, ".png",
-            arrayOf("http://ideihm.covam.es/wms/cartaENCp5")
-        ) {
-            override fun getTileURLString(pMapTileIndex: Long): String {
-                val z = MapTileIndex.getZoom(pMapTileIndex).toInt()
-                val x = MapTileIndex.getX(pMapTileIndex)
-                val y = MapTileIndex.getY(pMapTileIndex)
-                val n = Math.pow(2.0, z.toDouble())
-                val minLon = x / n * 360.0 - 180.0
-                val maxLon = (x + 1) / n * 360.0 - 180.0
-                val maxLat = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))))
-                val minLat = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 1) / n))))
-                val bbox = "$minLon,$minLat,$maxLon,$maxLat"
-                return "$baseUrl?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap" +
-                    "&LAYERS=MS:ENC&STYLES=&SRS=EPSG:4326" +
-                    "&BBOX=$bbox&WIDTH=256&HEIGHT=256" +
-                    "&FORMAT=image/png&TRANSPARENT=TRUE"
-            }
-        }
-        val ihmOverlay = TilesOverlay(
-            org.osmdroid.tileprovider.MapTileProviderBasic(context, ihmWmsSource), context
-        )
-        ihmOverlay.loadingBackgroundColor = Color.TRANSPARENT
-        ihmOverlay.loadingLineColor = Color.TRANSPARENT
-        mapView.overlays.add(ihmOverlay)
-
-        // Capa 2: OpenSeaMap — marcas de navegación (boyas, luces, puertos, peligros)
-        val openSeaMapSource = object : OnlineTileSourceBase(
-            "OpenSeaMap", 3, 18, 256, ".png",
-            arrayOf("https://tiles.openseamap.org/seamark/")
-        ) {
-            override fun getTileURLString(pMapTileIndex: Long): String =
-                baseUrl +
-                    MapTileIndex.getZoom(pMapTileIndex) + "/" +
-                    MapTileIndex.getX(pMapTileIndex) + "/" +
-                    MapTileIndex.getY(pMapTileIndex) + mImageFilenameEnding
-        }
-        val seamarkOverlay = TilesOverlay(
-            org.osmdroid.tileprovider.MapTileProviderBasic(context, openSeaMapSource), context
-        )
-        seamarkOverlay.loadingBackgroundColor = Color.TRANSPARENT
-        seamarkOverlay.loadingLineColor = Color.TRANSPARENT
-        mapView.overlays.add(seamarkOverlay)
-    }
-
-    // Curvas batimétricas EMODnet por defecto (líneas de profundidad como en OpenSeaMap)
-    private fun addDefaultDepthContours() {
-        val emodnetSource = object : OnlineTileSourceBase(
-            "EMODnet_Default", 3, 18, 256, ".png",
-            arrayOf("https://ows.emodnet-bathymetry.eu/wms")
-        ) {
-            override fun getTileURLString(pMapTileIndex: Long): String {
-                val z = MapTileIndex.getZoom(pMapTileIndex).toInt()
-                val x = MapTileIndex.getX(pMapTileIndex)
-                val y = MapTileIndex.getY(pMapTileIndex)
-                val n = Math.pow(2.0, z.toDouble())
-                val minLon = x / n * 360.0 - 180.0
-                val maxLon = (x + 1) / n * 360.0 - 180.0
-                val maxLat = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))))
-                val minLat = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 1) / n))))
-                val bbox = "$minLon,$minLat,$maxLon,$maxLat"
-                return "$baseUrl?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap" +
-                    "&LAYERS=emodnet:contours&STYLES=&SRS=EPSG:4326" +
-                    "&BBOX=$bbox&WIDTH=256&HEIGHT=256" +
-                    "&FORMAT=image/png&TRANSPARENT=TRUE"
-            }
-        }
-        val contourOverlay = TilesOverlay(
-            org.osmdroid.tileprovider.MapTileProviderBasic(context, emodnetSource), context
-        )
-        contourOverlay.loadingBackgroundColor = Color.TRANSPARENT
-        contourOverlay.loadingLineColor = Color.TRANSPARENT
-        mapView.overlays.add(contourOverlay)
-    }
-
-    // Fuente ESRI Ocean Base — batimetría coloreada por profundidad (sin API key)
-    private fun createEsriOceanSource() = object : OnlineTileSourceBase(
-        "ESRIOcean", 2, 19, 256, ".jpg",
-        arrayOf("https://services.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/")
-    ) {
-        override fun getTileURLString(pMapTileIndex: Long): String {
-            val z = MapTileIndex.getZoom(pMapTileIndex)
-            val x = MapTileIndex.getX(pMapTileIndex)
-            val y = MapTileIndex.getY(pMapTileIndex)
-            return "$baseUrl$z/$y/$x"  // ESRI usa z/y/x
-        }
-    }
-
     // Fuente de tiles de satélite (Google) con URL correcta
     private fun createSatelliteSource() = object : OnlineTileSourceBase(
         "GoogleSat", 2, 20, 256, ".jpg",
@@ -300,11 +208,11 @@ class MapFragment : Fragment() {
         }
     }
 
-    // Curvas EMODnet + marcas náuticas sobre el fondo ESRI Ocean coloreado
+    // Batimetría coloreada EMODnet + curvas + marcas náuticas
     private fun addBathymetryAndHazardOverlays() {
-        // EMODnet Bathymetry WMS — curvas batimétricas (isobaras de profundidad) para aguas europeas
-        val emodnetSource = object : OnlineTileSourceBase(
-            "EMODnet_Contours", 3, 18, 256, ".png",
+        // EMODnet mean_multicolour — profundidades coloreadas por rango (aguas europeas)
+        fun buildEmodnetOverlay(layer: String) = object : OnlineTileSourceBase(
+            "EMODnet_$layer", 3, 18, 256, ".png",
             arrayOf("https://ows.emodnet-bathymetry.eu/wms")
         ) {
             override fun getTileURLString(pMapTileIndex: Long): String {
@@ -318,17 +226,22 @@ class MapFragment : Fragment() {
                 val minLat = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 1) / n))))
                 val bbox = "$minLon,$minLat,$maxLon,$maxLat"
                 return "$baseUrl?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap" +
-                    "&LAYERS=emodnet:contours&STYLES=&SRS=EPSG:4326" +
+                    "&LAYERS=emodnet:$layer&STYLES=&SRS=EPSG:4326" +
                     "&BBOX=$bbox&WIDTH=256&HEIGHT=256" +
                     "&FORMAT=image/png&TRANSPARENT=TRUE"
             }
         }
-        val emodnetOverlay = TilesOverlay(
-            org.osmdroid.tileprovider.MapTileProviderBasic(context, emodnetSource), context
-        )
-        emodnetOverlay.loadingBackgroundColor = Color.TRANSPARENT
-        emodnetOverlay.loadingLineColor = Color.TRANSPARENT
-        mapView.overlays.add(emodnetOverlay)
+        fun addOverlay(source: OnlineTileSourceBase) {
+            val overlay = TilesOverlay(
+                org.osmdroid.tileprovider.MapTileProviderBasic(context, source), context
+            )
+            overlay.loadingBackgroundColor = Color.TRANSPARENT
+            overlay.loadingLineColor = Color.TRANSPARENT
+            mapView.overlays.add(overlay)
+        }
+
+        addOverlay(buildEmodnetOverlay("mean_multicolour"))  // colores de profundidad
+        addOverlay(buildEmodnetOverlay("contours"))          // isobaras
 
         // OpenSeaMap — marcas de navegación (boyas, luces, peligros puntuales)
         val openSeaMapSource = object : OnlineTileSourceBase(
@@ -575,7 +488,7 @@ class MapFragment : Fragment() {
                 mapView.overlays.add(rot)
 
                 when (which) {
-                    0 -> { mapView.setTileSource(createEsriOceanSource()); addBathymetryAndHazardOverlays() }
+                    0 -> { mapView.setTileSource(TileSourceFactory.MAPNIK); addBathymetryAndHazardOverlays() }
                     1 -> { mapView.setTileSource(createSatelliteSource()); addBathymetryAndHazardOverlays() }
                 }
                 restoreNonTileOverlays()
