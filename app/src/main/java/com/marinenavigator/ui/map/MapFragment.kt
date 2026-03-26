@@ -264,7 +264,25 @@ class MapFragment : Fragment() {
 
         addOverlay(buildEmodnetOverlay("mean"))      // gradiente azul de profundidad, transparente en tierra
         addOverlay(buildEmodnetOverlay("contours"))  // isobaras de profundidad
-        // Los puertos y faros se cargan dinámicamente en loadPortsAndLighthouses()
+
+        // OpenSeaMap seamark — balizas, luces, sectores, puertos, etc. (igual que openseamap.org)
+        val openSeaMapSource = object : OnlineTileSourceBase(
+            "OpenSeaMap", 3, 18, 256, ".png",
+            arrayOf("https://tiles.openseamap.org/seamark/")
+        ) {
+            override fun getTileURLString(pMapTileIndex: Long): String =
+                baseUrl +
+                    MapTileIndex.getZoom(pMapTileIndex) + "/" +
+                    MapTileIndex.getX(pMapTileIndex) + "/" +
+                    MapTileIndex.getY(pMapTileIndex) + mImageFilenameEnding
+        }
+        val seamarkOverlay = TilesOverlay(
+            org.osmdroid.tileprovider.MapTileProviderBasic(context, openSeaMapSource), context
+        )
+        seamarkOverlay.loadingBackgroundColor = Color.TRANSPARENT
+        seamarkOverlay.loadingLineColor = Color.TRANSPARENT
+        mapView.overlays.add(seamarkOverlay)
+        // Los puertos y faros de Overpass se cargan en loadPortsAndLighthouses() para dar nombres al tocar
     }
 
     // Restaura todos los overlays no-tile tras cambiar capa base
