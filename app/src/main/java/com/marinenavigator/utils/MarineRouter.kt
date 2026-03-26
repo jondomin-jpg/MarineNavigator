@@ -22,7 +22,7 @@ import kotlin.math.sqrt
  */
 object MarineRouter {
 
-    private const val GRID_N          = 200   // resolución cuadrícula 200×200
+    private const val GRID_N          = 400   // resolución cuadrícula 400×400
     private const val PADDING         = 0.15  // grados de margen
     private const val HAZARD_BUFFER   = 2     // celdas de seguridad alrededor de cada peligro puntual
     private const val COAST_BUFFER    = 2     // celdas de buffer alrededor de los segmentos de costa (muro sólido)
@@ -58,7 +58,7 @@ object MarineRouter {
                 return@withContext listOf(GeoPoint(fromLat, fromLon), GeoPoint(toLat, toLon))
             }
 
-            val grid = buildGrid(coastSegments, hazardPoints, hazardAreas, south, west, north, east, fromLat, fromLon)
+            val grid = buildGrid(coastSegments, hazardPoints, hazardAreas, south, west, north, east, fromLat, fromLon, toLat, toLon)
             val path = aStar(fromLat, fromLon, toLat, toLon, south, west, north, east, grid)
 
             if (path.size < 2) listOf(GeoPoint(fromLat, fromLon), GeoPoint(toLat, toLon))
@@ -218,7 +218,8 @@ object MarineRouter {
         hazardPoints:  List<LatLon>,
         hazardAreas:   List<List<Pair<LatLon, LatLon>>>,
         south: Double, west: Double, north: Double, east: Double,
-        fromLat: Double, fromLon: Double
+        fromLat: Double, fromLon: Double,
+        toLat: Double, toLon: Double
     ): Array<BooleanArray> {
         val latStep = (north - south) / GRID_N
         val lonStep = (east - west)  / GRID_N
@@ -276,37 +277,48 @@ object MarineRouter {
                 }
         }
 
-        // 4. Flood fill desde el origen (punto en el mar) para identificar todas
-        //    las celdas de mar alcanzables. Cualquier celda NO alcanzable se trata
-        //    como tierra aunque no tenga segmento de costa explícito.
-        //    → Resuelve el problema de segmentos de costa abiertos (no cierran polígono).
-        var seedRow = ((fromLat - south) / latStep).toInt().coerceIn(0, GRID_N - 1)
-        var seedCol = ((fromLon - west)  / lonStep).toInt().coerceIn(0, GRID_N - 1)
-        // Si el origen cayó sobre un muro, buscar celda libre más cercana
-        if (walls[seedRow][seedCol]) {
-            outer@ for (radius in 1..20) {
+        // 4. Flood fill multi-seed para identificar todas las celdas de mar alcanzables.
+        //    Se usan 3 seeds: origen, destino y centro del bbox. Así, si el origen está
+        //    dentro de un puerto/ría cerrado por el buffer de costa, el destino o el centro
+        //    (en mar abierto) garantizan que el flood-fill cubra todas las celdas de mar.
+        val candidateSeeds = listOf(
+            Pair(fromLat, fromLon),
+            Pair(toLat,   toLon),
+            Pair((south + north) / 2.0, (west + east) / 2.0)
+        )
+        fun nearestFreeCell(lat: Double, lon: Double): Pair<Int,Int>? {
+            var r = ((lat - south) / latStep).toInt().coerceIn(0, GRID_N - 1)
+            var c = ((lon - west)  / lonStep).toInt().coerceIn(0, GRID_N - 1)
+            if (!walls[r][c]) return Pair(r, c)
+            for (radius in 1..30) {
                 for (dr in -radius..radius) for (dc in -radius..radius) {
-                    val nr = seedRow + dr; val nc = seedCol + dc
-                    if (nr in 0 until GRID_N && nc in 0 until GRID_N && !walls[nr][nc]) {
-                        seedRow = nr; seedCol = nc; break@outer
-                    }
+                    val nr = r + dr; val nc = c + dc
+                    if (nr in 0 until GRID_N && nc in 0 until GRID_N && !walls[nr][nc])
+                        return Pair(nr, nc)
                 }
             }
+            return null
         }
+
         val sea = Array(GRID_N) { BooleanArray(GRID_N) }
         val queue = ArrayDeque<Int>()
-        sea[seedRow][seedCol] = true
-        queue.add(seedRow * GRID_N + seedCol)
+        for ((seedLat, seedLon) in candidateSeeds) {
+            val seed = nearestFreeCell(seedLat, seedLon) ?: continue
+            if (!sea[seed.first][seed.second]) {
+                sea[seed.first][seed.second] = true
+                queue.add(seed.first * GRID_N + seed.second)
+            }
+        }
         while (queue.isNotEmpty()) {
             val idx = queue.removeFirst()
             val r = idx / GRID_N; val c = idx % GRID_N
-            if (r > 0       && !sea[r-1][c] && !walls[r-1][c]) { sea[r-1][c] = true; queue.add((r-1)*GRID_N+c) }
+            if (r > 0        && !sea[r-1][c] && !walls[r-1][c]) { sea[r-1][c] = true; queue.add((r-1)*GRID_N+c) }
             if (r < GRID_N-1 && !sea[r+1][c] && !walls[r+1][c]) { sea[r+1][c] = true; queue.add((r+1)*GRID_N+c) }
-            if (c > 0       && !sea[r][c-1] && !walls[r][c-1]) { sea[r][c-1] = true; queue.add(r*GRID_N+c-1) }
+            if (c > 0        && !sea[r][c-1] && !walls[r][c-1]) { sea[r][c-1] = true; queue.add(r*GRID_N+c-1) }
             if (c < GRID_N-1 && !sea[r][c+1] && !walls[r][c+1]) { sea[r][c+1] = true; queue.add(r*GRID_N+c+1) }
         }
 
-        // Celda bloqueada = muro O no alcanzable desde el mar
+        // Celda bloqueada = muro O no alcanzable desde ningún seed de mar
         return Array(GRID_N) { r -> BooleanArray(GRID_N) { c -> walls[r][c] || !sea[r][c] } }
     }
 
