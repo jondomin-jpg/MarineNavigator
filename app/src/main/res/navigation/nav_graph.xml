@@ -24,4 +24,9 @@
         android:name="com.marinenavigator.ui.waypoints.WaypointsFragment"
         android:label="Waypoints" />
 
+    <fragment
+        android:id="@+id/weatherFragment"
+        android:name="com.marinenavigator.ui.weather.WeatherFragment"
+        android:label="Tiempo" />
+
 </navigation>

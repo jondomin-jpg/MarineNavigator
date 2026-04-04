@@ -21,4 +21,9 @@
         android:icon="@drawable/ic_waypoint"
         android:title="@string/nav_waypoints" />
 
+    <item
+        android:id="@+id/weatherFragment"
+        android:icon="@drawable/ic_weather"
+        android:title="@string/nav_weather" />
+
 </menu>
