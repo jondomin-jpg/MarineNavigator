@@ -2,10 +2,8 @@ name: Build APK
 
 on:
   push:
-    branches: [ master, main ]
-  pull_request:
-    branches: [ master, main ]
-  workflow_dispatch:  # permite lanzarlo manualmente desde GitHub
+    branches: [ master, main, 'claude/**' ]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -21,6 +19,15 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: Caché de Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: gradle-
+
       - name: Configurar Android SDK
         uses: android-actions/setup-android@v3
 
@@ -28,7 +35,9 @@ jobs:
         run: chmod +x gradlew
 
       - name: Compilar APK debug
-        run: ./gradlew assembleDebug --no-daemon
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.daemon=false"
 
       - name: Subir APK como artefacto
         uses: actions/upload-artifact@v4

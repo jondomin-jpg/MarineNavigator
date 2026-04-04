@@ -46,6 +46,23 @@ class FishingFragment : Fragment() {
                     .setPositiveButton("Eliminar") { _, _ -> viewModel.deleteFishingPoint(point) }
                     .setNegativeButton("Cancelar", null)
                     .show()
+            },
+            onRenameClick = { point ->
+                val input = com.google.android.material.textfield.TextInputEditText(requireContext()).apply {
+                    setText(point.name)
+                    setPadding(48, 16, 48, 16)
+                    setTextColor(android.graphics.Color.WHITE)
+                    setHintTextColor(android.graphics.Color.parseColor("#88AABB"))
+                }
+                MaterialAlertDialogBuilder(requireContext())
+                    .setTitle("Editar nombre")
+                    .setView(input)
+                    .setPositiveButton("Guardar") { _, _ ->
+                        val name = input.text.toString().trim().ifBlank { return@setPositiveButton }
+                        viewModel.renameFishingPoint(point, name)
+                    }
+                    .setNegativeButton("Cancelar", null)
+                    .show()
             }
         )
 
@@ -76,7 +93,8 @@ class FishingFragment : Fragment() {
 // ─────────────────────────────────────────────────────────────
 class FishingAdapter(
     private val onNavigateClick: (FishingPoint) -> Unit,
-    private val onDeleteClick: (FishingPoint) -> Unit
+    private val onDeleteClick: (FishingPoint) -> Unit,
+    private val onRenameClick: (FishingPoint) -> Unit
 ) : RecyclerView.Adapter<FishingAdapter.VH>() {
 
     private var points: List<FishingPoint> = emptyList()
@@ -117,6 +135,7 @@ class FishingAdapter(
 
             btnNavigateToFishing.setOnClickListener { onNavigateClick(point) }
             btnDeleteFishing.setOnClickListener { onDeleteClick(point) }
+            tvFishingName.setOnLongClickListener { onRenameClick(point); true }
         }
     }
 }

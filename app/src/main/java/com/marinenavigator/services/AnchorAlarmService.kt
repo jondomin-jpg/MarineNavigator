@@ -2,6 +2,9 @@ package com.marinenavigator.services
 
 import android.app.*
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioManager
+import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.os.*
 import androidx.core.app.NotificationCompat
@@ -30,6 +33,7 @@ class AnchorAlarmService : LifecycleService() {
     private var config: AnchorAlarmConfig? = null
     private var alarmTriggered = false
     private lateinit var vibrator: Vibrator
+    private var alarmPlayer: MediaPlayer? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -97,9 +101,30 @@ class AnchorAlarmService : LifecycleService() {
 
     private fun triggerAlarm(distance: Double, radius: Double) {
         Timber.w("¡ALARMA DE FONDEO! Distancia: %.0f m (límite: %.0f m)".format(distance, radius))
-        // Vibración continua
-        val pattern = longArrayOf(0, 1000, 500, 1000, 500, 1000)
+        // Vibración continua en bucle
+        val pattern = longArrayOf(0, 1000, 500, 1000, 500)
         vibrator.vibrate(VibrationEffect.createWaveform(pattern, 0))
+        // Sonido de alarma en bucle con MediaPlayer
+        if (alarmPlayer == null) {
+            val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            try {
+                alarmPlayer = MediaPlayer().apply {
+                    setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_ALARM)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build()
+                    )
+                    setDataSource(this@AnchorAlarmService, alarmUri)
+                    isLooping = true
+                    prepare()
+                    start()
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Error iniciando sonido de alarma de fondeo")
+            }
+        }
         // Notificación de alarma
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         nm.notify(NOTIFICATION_ID, buildAlarmNotification(distance))
@@ -107,6 +132,9 @@ class AnchorAlarmService : LifecycleService() {
 
     private fun stopAlarm() {
         vibrator.cancel()
+        alarmPlayer?.stop()
+        alarmPlayer?.release()
+        alarmPlayer = null
     }
 
     private fun buildNotification(radius: Double, alarming: Boolean): Notification {

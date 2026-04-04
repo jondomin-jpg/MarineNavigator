@@ -31,7 +31,6 @@ class RoutesFragment : Fragment() {
         val adapter = RouteAdapter(
             onViewClick = { route ->
                 viewModel.loadRouteOnMap(route.id)
-                // Navegar de vuelta al mapa
                 requireActivity().supportFragmentManager.popBackStack()
             },
             onDeleteClick = { route ->
@@ -39,6 +38,23 @@ class RoutesFragment : Fragment() {
                     .setTitle("Eliminar ruta")
                     .setMessage("¿Eliminar '${route.name}'? Esta acción no se puede deshacer.")
                     .setPositiveButton("Eliminar") { _, _ -> viewModel.deleteRoute(route) }
+                    .setNegativeButton("Cancelar", null)
+                    .show()
+            },
+            onRenameClick = { route ->
+                val input = com.google.android.material.textfield.TextInputEditText(requireContext()).apply {
+                    setText(route.name)
+                    setPadding(48, 16, 48, 16)
+                    setTextColor(android.graphics.Color.WHITE)
+                    setHintTextColor(android.graphics.Color.parseColor("#88AABB"))
+                }
+                MaterialAlertDialogBuilder(requireContext())
+                    .setTitle("Editar nombre")
+                    .setView(input)
+                    .setPositiveButton("Guardar") { _, _ ->
+                        val name = input.text.toString().trim().ifBlank { return@setPositiveButton }
+                        viewModel.renameRoute(route, name)
+                    }
                     .setNegativeButton("Cancelar", null)
                     .show()
             }
@@ -63,7 +79,8 @@ class RoutesFragment : Fragment() {
 // ─────────────────────────────────────────────────────────────
 class RouteAdapter(
     private val onViewClick: (Route) -> Unit,
-    private val onDeleteClick: (Route) -> Unit
+    private val onDeleteClick: (Route) -> Unit,
+    private val onRenameClick: (Route) -> Unit
 ) : RecyclerView.Adapter<RouteAdapter.VH>() {
 
     private var routes: List<Route> = emptyList()
@@ -94,6 +111,7 @@ class RouteAdapter(
             )
             btnViewRoute.setOnClickListener { onViewClick(route) }
             btnDeleteRoute.setOnClickListener { onDeleteClick(route) }
+            tvRouteName.setOnLongClickListener { onRenameClick(route); true }
         }
     }
 }

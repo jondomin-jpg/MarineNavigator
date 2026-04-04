@@ -69,6 +69,25 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
     // Actualizar estado de navegación al cambiar el GPS
     // ─────────────────────────────────────────────────────────
     init {
+        // Colector de track en tiempo real durante grabación
+        viewModelScope.launch {
+            NavigationService.gpsData.collect { gps ->
+                if (isRecording.value && gps.isValid && activeRouteId != null) {
+                    val current = _currentTrackPoints.value.orEmpty()
+                    val newPoint = TrackPoint(
+                        routeId = activeRouteId!!,
+                        latitude = gps.latitude,
+                        longitude = gps.longitude,
+                        altitude = gps.altitude,
+                        speed = gps.speedMs,
+                        bearing = gps.bearing,
+                        accuracy = gps.accuracy,
+                        timestamp = gps.timestamp
+                    )
+                    _currentTrackPoints.postValue(current + newPoint)
+                }
+            }
+        }
         viewModelScope.launch {
             NavigationService.gpsData.collect { gps ->
                 val current = _navigationState.value ?: return@collect
@@ -168,6 +187,10 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun renameRoute(route: Route, newName: String) {
+        viewModelScope.launch { db.routeDao().update(route.copy(name = newName)) }
+    }
+
     fun deleteRoute(route: Route) {
         viewModelScope.launch { db.routeDao().delete(route) }
     }
@@ -209,6 +232,10 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun renameWaypoint(waypoint: Waypoint, newName: String) {
+        viewModelScope.launch { db.waypointDao().update(waypoint.copy(name = newName)) }
+    }
+
     fun deleteWaypoint(waypoint: Waypoint) {
         viewModelScope.launch { db.waypointDao().delete(waypoint) }
     }
@@ -224,6 +251,10 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun renameFishingPoint(point: FishingPoint, newName: String) {
+        viewModelScope.launch { db.fishingPointDao().update(point.copy(name = newName)) }
+    }
+
     fun deleteFishingPoint(point: FishingPoint) {
         viewModelScope.launch { db.fishingPointDao().delete(point) }
     }
@@ -233,7 +264,7 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
     // ─────────────────────────────────────────────────────────
     fun activateAnchorAlarm(radiusMeters: Double) {
         val gps = gpsData.value
-        if (!gps.isValid) return
+        if (gps.latitude == 0.0 && gps.longitude == 0.0) return  // sin posición GPS
         val cfg = AnchorAlarmConfig(
             isActive = true,
             centerLat = gps.latitude,

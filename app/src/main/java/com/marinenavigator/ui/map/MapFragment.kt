@@ -1,15 +1,23 @@
 package com.marinenavigator.ui.map
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Paint
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.os.Bundle
 import android.view.*
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import android.graphics.Bitmap
+import android.graphics.drawable.BitmapDrawable
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.DrawableCompat
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
@@ -17,17 +25,29 @@ import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.TextInputEditText
 import com.marinenavigator.R
+import com.marinenavigator.analytics.UmamiAnalytics
 import com.marinenavigator.data.models.FishingPoint
 import com.marinenavigator.data.models.Waypoint
 import com.marinenavigator.databinding.FragmentMapBinding
 import com.marinenavigator.services.NavigationService
 import com.marinenavigator.utils.NavigationUtils
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapEventsReceiver
+import org.osmdroid.events.MapListener
+import org.osmdroid.events.ScrollEvent
+import org.osmdroid.events.ZoomEvent
+import timber.log.Timber
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
 import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
-import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.util.MapTileIndex
 import org.osmdroid.views.MapView
@@ -44,14 +64,47 @@ class MapFragment : Fragment() {
 
     private lateinit var mapView: MapView
     private lateinit var locationOverlay: MyLocationNewOverlay
-    private var routeOverlay: Polyline? = null
+    private var routeOverlay: Polyline? = null   // ruta de navegación calculada
+    private var trackOverlay: Polyline? = null   // track grabado en tiempo real
     private var destinationMarker: Marker? = null
     private var originMarker: Marker? = null
-    private var anchorCircle: Polygon? = null
+    private var anchorCircleOverlay: Overlay? = null
+    private var anchorMarkerOverlay: Marker? = null
     private val fishingMarkers = mutableListOf<Marker>()
     private val waypointMarkers = mutableListOf<Marker>()
+    private val portMarkers = mutableListOf<Marker>()
+    private var portLoadJob: Job? = null
+    private var lastPortBbox = ""
     private var followLocation = true
     private var showNauticalCharts = true
+    private var mapEventsOverlay: MapEventsOverlay? = null
+    private var scaleBarOverlay: ScaleBarOverlay? = null
+
+    // Sensor para brújula física
+    private var sensorManager: SensorManager? = null
+    private var rotationSensor: Sensor? = null
+    private var smoothedCompassBearing = 0f
+    private val rotMatrix = FloatArray(9)
+    private val orientation = FloatArray(3)
+    private val sensorListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            SensorManager.getRotationMatrixFromVector(rotMatrix, event.values)
+            SensorManager.getOrientation(rotMatrix, orientation)
+            val raw = (Math.toDegrees(orientation[0].toDouble()).toFloat() + 360f) % 360f
+            // Filtro paso bajo para suavizar la lectura
+            var diff = raw - smoothedCompassBearing
+            while (diff > 180f) diff -= 360f
+            while (diff < -180f) diff += 360f
+            smoothedCompassBearing = (smoothedCompassBearing + 0.15f * diff + 360f) % 360f
+            _binding?.compassView?.setBearing(smoothedCompassBearing)
+            _binding?.compassTapeView?.setHeading(smoothedCompassBearing)
+            if (::mapView.isInitialized) {
+                _binding?.northMapCompass?.setBearing(mapView.mapOrientation)
+                mapView.postInvalidate()
+            }
+        }
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -73,6 +126,8 @@ class MapFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        sensorManager = requireContext().getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        rotationSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
         checkPermissionsAndInit()
         setupButtons()
         observeViewModel()
@@ -105,7 +160,7 @@ class MapFragment : Fragment() {
         mapView.setMultiTouchControls(true)
         mapView.controller.setZoom(14.0)
 
-        // Base: OpenStreetMap (fiable, sin API key)
+        // Base: OpenStreetMap
         mapView.setTileSource(TileSourceFactory.MAPNIK)
 
         // Overlay de rotación de mapa
@@ -113,8 +168,11 @@ class MapFragment : Fragment() {
         rotationOverlay.isEnabled = true
         mapView.overlays.add(rotationOverlay)
 
-        // Overlay de marcas náuticas OpenSeaMap (boyas, luces, puertos)
-        addNauticalChartOverlay()
+        // Batimetría coloreada (GEBCO) + curvas EMODnet + marcas náuticas OpenSeaMap
+        addBathymetryAndHazardOverlays()
+
+        // Indicador de Norte: View fija en el layout, se actualiza con mapView.mapOrientation
+        binding.northMapCompass.setBearing(0f)
 
         // Overlay de posición
         locationOverlay = MyLocationNewOverlay(GpsMyLocationProvider(context), mapView)
@@ -129,44 +187,89 @@ class MapFragment : Fragment() {
         mapView.overlays.add(locationOverlay)
 
         // Overlay para tap en el mapa
-        val mapEventsOverlay = MapEventsOverlay(object : MapEventsReceiver {
+        mapEventsOverlay = MapEventsOverlay(object : MapEventsReceiver {
             override fun singleTapConfirmedHelper(p: GeoPoint): Boolean = false
             override fun longPressHelper(p: GeoPoint): Boolean {
                 showLongPressMenu(p)
                 return true
             }
         })
-        mapView.overlays.add(mapEventsOverlay)
+        mapView.overlays.add(mapEventsOverlay!!)
 
         // Escala
-        val scaleBar = ScaleBarOverlay(mapView)
-        scaleBar.setUnitsOfMeasure(ScaleBarOverlay.UnitsOfMeasure.nautical)
-        scaleBar.setAlignRight(true)
-        mapView.overlays.add(scaleBar)
+        scaleBarOverlay = ScaleBarOverlay(mapView).apply {
+            setUnitsOfMeasure(ScaleBarOverlay.UnitsOfMeasure.nautical)
+            setAlignRight(true)
+        }
+        mapView.overlays.add(scaleBarOverlay!!)
+
+        // Recargar puertos/faros al mover el mapa
+        mapView.addMapListener(object : MapListener {
+            override fun onScroll(event: ScrollEvent): Boolean { loadPortsAndLighthouses(); return false }
+            override fun onZoom(event: ZoomEvent): Boolean { loadPortsAndLighthouses(); return false }
+        })
+        loadPortsAndLighthouses()
 
         mapView.invalidate()
     }
 
-    private fun addNauticalChartOverlay() {
-        // Capa 1: ESRI Ocean Reference (nombres de lugares marítimos, límites)
-        val esriOceanRefSource = object : OnlineTileSourceBase(
-            "ESRIOceanRef", 2, 18, 256, ".png",
-            arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/")
-        ) {
-            override fun getTileURLString(pMapTileIndex: Long): String =
-                baseUrl +
-                    MapTileIndex.getZoom(pMapTileIndex) + "/" +
-                    MapTileIndex.getY(pMapTileIndex) + "/" +
-                    MapTileIndex.getX(pMapTileIndex)
-        }
-        val refOverlay = TilesOverlay(
-            org.osmdroid.tileprovider.MapTileProviderBasic(context, esriOceanRefSource), context
+    // Fuente de tiles de satélite (Google) con URL correcta
+    private fun createSatelliteSource() = object : OnlineTileSourceBase(
+        "GoogleSat", 2, 20, 256, ".jpg",
+        arrayOf(
+            "https://mt0.google.com/vt/lyrs=s&hl=en&",
+            "https://mt1.google.com/vt/lyrs=s&hl=en&",
+            "https://mt2.google.com/vt/lyrs=s&hl=en&"
         )
-        refOverlay.loadingBackgroundColor = Color.TRANSPARENT
-        refOverlay.loadingLineColor = Color.TRANSPARENT
-        mapView.overlays.add(refOverlay)
+    ) {
+        override fun getTileURLString(pMapTileIndex: Long): String {
+            val z = MapTileIndex.getZoom(pMapTileIndex)
+            val x = MapTileIndex.getX(pMapTileIndex)
+            val y = MapTileIndex.getY(pMapTileIndex)
+            return "${baseUrl}x=$x&y=$y&z=$z"
+        }
+    }
 
-        // Capa 2: OpenSeaMap — marcas de navegación (boyas, luces, puertos, peligros)
+    // Batimetría coloreada EMODnet + curvas + marcas náuticas
+    private fun addBathymetryAndHazardOverlays() {
+        // layer: nombre del layer EMODnet; styles/extra: parámetros WMS adicionales
+        fun buildEmodnetOverlay(layer: String, styles: String = "", extra: String = "") =
+            object : OnlineTileSourceBase(
+                "EMODnet_$layer", 3, 18, 256, ".png",
+                arrayOf("https://ows.emodnet-bathymetry.eu/wms")
+            ) {
+                override fun getTileURLString(pMapTileIndex: Long): String {
+                    val z = MapTileIndex.getZoom(pMapTileIndex).toInt()
+                    val x = MapTileIndex.getX(pMapTileIndex)
+                    val y = MapTileIndex.getY(pMapTileIndex)
+                    val n = Math.pow(2.0, z.toDouble())
+                    val minLon = x / n * 360.0 - 180.0
+                    val maxLon = (x + 1) / n * 360.0 - 180.0
+                    val maxLat = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))))
+                    val minLat = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 1) / n))))
+                    val bbox = "$minLon,$minLat,$maxLon,$maxLat"
+                    return "$baseUrl?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap" +
+                        "&LAYERS=emodnet:$layer&STYLES=$styles&SRS=EPSG:4326" +
+                        "&BBOX=$bbox&WIDTH=256&HEIGHT=256" +
+                        "&FORMAT=image/png&TRANSPARENT=TRUE" +
+                        (if (extra.isNotEmpty()) "&$extra" else "")
+                }
+            }
+        fun addOverlay(source: OnlineTileSourceBase) {
+            val overlay = TilesOverlay(
+                org.osmdroid.tileprovider.MapTileProviderBasic(context, source), context
+            )
+            overlay.loadingBackgroundColor = Color.TRANSPARENT
+            overlay.loadingLineColor = Color.TRANSPARENT
+            mapView.overlays.add(overlay)
+        }
+
+        // Gradiente azul océano (boxfill/occam = paleta ncWMS, azul claro→oscuro por profundidad)
+        // COLORSCALERANGE=-6000,0 → tierra sin datos = transparente
+        addOverlay(buildEmodnetOverlay("mean", "boxfill/occam", "COLORSCALERANGE=-6000,0"))
+        addOverlay(buildEmodnetOverlay("contours"))  // isobaras de profundidad
+
+        // OpenSeaMap seamark — balizas, luces, sectores, puertos, etc. (igual que openseamap.org)
         val openSeaMapSource = object : OnlineTileSourceBase(
             "OpenSeaMap", 3, 18, 256, ".png",
             arrayOf("https://tiles.openseamap.org/seamark/")
@@ -183,6 +286,131 @@ class MapFragment : Fragment() {
         seamarkOverlay.loadingBackgroundColor = Color.TRANSPARENT
         seamarkOverlay.loadingLineColor = Color.TRANSPARENT
         mapView.overlays.add(seamarkOverlay)
+        // Los puertos y faros de Overpass se cargan en loadPortsAndLighthouses() para dar nombres al tocar
+    }
+
+    // Restaura todos los overlays no-tile tras cambiar capa base
+    private fun restoreNonTileOverlays() {
+        mapView.overlays.add(locationOverlay)
+        portMarkers.forEach { mapView.overlays.add(it) }
+        fishingMarkers.forEach { mapView.overlays.add(it) }
+        waypointMarkers.forEach { mapView.overlays.add(it) }
+        routeOverlay?.let { mapView.overlays.add(it) }
+        trackOverlay?.let { mapView.overlays.add(it) }
+        destinationMarker?.let { mapView.overlays.add(it) }
+        originMarker?.let { mapView.overlays.add(it) }
+        anchorCircleOverlay?.let { mapView.overlays.add(it) }
+        anchorMarkerOverlay?.let { mapView.overlays.add(it) }
+        mapEventsOverlay?.let { mapView.overlays.add(it) }
+        scaleBarOverlay?.let { mapView.overlays.add(it) }
+        mapView.invalidate()
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // PUERTOS Y FAROS — carga dinámica desde Overpass API
+    // ─────────────────────────────────────────────────────────
+    private fun loadPortsAndLighthouses() {
+        portLoadJob?.cancel()
+        portLoadJob = viewLifecycleOwner.lifecycleScope.launch {
+            delay(700)  // debounce: esperar a que deje de hacer scroll
+            val bb = mapView.boundingBox ?: return@launch
+            if (mapView.zoomLevelDouble < 7.0) return@launch
+            val key = "%.2f,%.2f,%.2f,%.2f".format(bb.latSouth, bb.lonWest, bb.latNorth, bb.lonEast)
+            if (key == lastPortBbox) return@launch
+            lastPortBbox = key
+            val markers = try {
+                fetchPortsAndLighthouses(bb.latSouth, bb.lonWest, bb.latNorth, bb.lonEast)
+            } catch (e: Exception) {
+                Timber.w(e, "Error cargando puertos/faros"); return@launch
+            }
+            portMarkers.forEach { mapView.overlays.remove(it) }
+            portMarkers.clear()
+            portMarkers.addAll(markers)
+            markers.forEach { mapView.overlays.add(it) }
+            mapView.invalidate()
+        }
+    }
+
+    private suspend fun fetchPortsAndLighthouses(
+        south: Double, west: Double, north: Double, east: Double
+    ): List<Marker> = withContext(Dispatchers.IO) {
+        val bbox = "$south,$west,$north,$east"
+        val query = """
+            [out:json][timeout:20];
+            (
+              node["amenity"="harbour"]($bbox);
+              node["seamark:type"="harbour"]($bbox);
+              node["seamark:type"="light_major"]($bbox);
+              node["seamark:type"="light_minor"]($bbox);
+              way["amenity"="harbour"]($bbox);
+            );
+            out center;
+        """.trimIndent()
+        val encoded = URLEncoder.encode(query, "UTF-8")
+        val conn = URL("https://overpass-api.de/api/interpreter?data=$encoded")
+            .openConnection() as HttpURLConnection
+        conn.connectTimeout = 15_000
+        conn.readTimeout    = 25_000
+        conn.setRequestProperty("User-Agent", "MarineNavigator/1.0")
+        val markers = mutableListOf<Marker>()
+        try {
+            val root = JSONObject(conn.inputStream.bufferedReader().readText())
+            val elements = root.getJSONArray("elements")
+            for (i in 0 until elements.length()) {
+                val el   = elements.getJSONObject(i)
+                val lat  = if (el.has("lat")) el.getDouble("lat")
+                           else el.optJSONObject("center")?.getDouble("lat") ?: continue
+                val lon  = if (el.has("lon")) el.getDouble("lon")
+                           else el.optJSONObject("center")?.getDouble("lon") ?: continue
+                val tags = el.optJSONObject("tags")
+                fun tag(vararg keys: String) = keys.mapNotNull {
+                    tags?.optString(it)?.takeIf { v -> v.isNotEmpty() && v != "null" }
+                }.firstOrNull() ?: ""
+                val smt     = tag("seamark:type")
+                val isLight = smt in listOf("light_major", "light_minor")
+                val isPort  = smt == "harbour" || tag("amenity") == "harbour"
+                if (!isLight && !isPort) continue
+                val name = tag("name", "seamark:name", "seamark:light_major:name",
+                                "seamark:light_minor:name", "official_name")
+                val title = when {
+                    name.isNotEmpty() -> name
+                    isLight -> {
+                        val ch = tag("seamark:light:character", "light:character")
+                        if (ch.isNotEmpty()) "Faro ($ch)" else "Faro"
+                    }
+                    else -> tag("seamark:harbour:name").ifEmpty { "Puerto" }
+                }
+                val snippet = if (isLight) {
+                    listOfNotNull(
+                        tag("seamark:light:range").takeIf { it.isNotEmpty() }?.let { "Alcance: ${it}nm" },
+                        tag("seamark:light:period").takeIf { it.isNotEmpty() }?.let { "Periodo: ${it}s" }
+                    ).joinToString(" · ").ifEmpty { null }
+                } else null
+                markers += Marker(mapView).apply {
+                    position    = GeoPoint(lat, lon)
+                    this.title   = title
+                    this.snippet = snippet
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                    icon = makeMarkerIcon(if (isLight) Color.YELLOW else Color.CYAN)
+                }
+            }
+        } finally { conn.disconnect() }
+        markers
+    }
+
+    private fun makeMarkerIcon(colorInt: Int): BitmapDrawable {
+        val px  = (16 * resources.displayMetrics.density).toInt().coerceAtLeast(16)
+        val bmp = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
+        val cv  = android.graphics.Canvas(bmp)
+        val sw  = px * 0.18f
+        val fill   = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = colorInt }
+        val border = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE; style = Paint.Style.STROKE; strokeWidth = sw
+        }
+        val r = px / 2f
+        cv.drawCircle(r, r, r - sw, fill)
+        cv.drawCircle(r, r, r - sw, border)
+        return BitmapDrawable(resources, bmp)
     }
 
     // ─────────────────────────────────────────────────────────
@@ -193,8 +421,7 @@ class MapFragment : Fragment() {
             "Navegar aquí",
             "Establecer como origen de ruta",
             "Guardar como waypoint",
-            "Guardar punto de pesca",
-            "Establecer fondeo aquí"
+            "Guardar punto de pesca"
         )
         MaterialAlertDialogBuilder(requireContext())
             .setTitle("%.5f, %.5f".format(point.latitude, point.longitude))
@@ -216,7 +443,6 @@ class MapFragment : Fragment() {
                     }
                     2 -> showSaveWaypointDialog(point)
                     3 -> showSaveFishingPointDialog(point)
-                    4 -> showAnchorAlarmDialog(point)
                 }
             }
             .show()
@@ -226,6 +452,8 @@ class MapFragment : Fragment() {
         val editText = TextInputEditText(requireContext()).apply {
             hint = "Nombre del destino"
             setPadding(48, 16, 48, 16)
+            setTextColor(android.graphics.Color.WHITE)
+            setHintTextColor(android.graphics.Color.parseColor("#88AABB"))
         }
         MaterialAlertDialogBuilder(requireContext())
             .setTitle("Navegar a")
@@ -238,6 +466,7 @@ class MapFragment : Fragment() {
                 // Calcular ruta marina evitando tierra
                 Toast.makeText(context, "Calculando ruta marina...", Toast.LENGTH_SHORT).show()
                 viewModel.calculateMarineRoute(point.latitude, point.longitude)
+                UmamiAnalytics.track(UmamiAnalytics.Event.ROUTE_CALCULATED)
             }
             .setNegativeButton("Cancelar", null)
             .show()
@@ -247,6 +476,8 @@ class MapFragment : Fragment() {
         val editText = TextInputEditText(requireContext()).apply {
             hint = "Nombre del waypoint"
             setPadding(48, 16, 48, 16)
+            setTextColor(android.graphics.Color.WHITE)
+            setHintTextColor(android.graphics.Color.parseColor("#88AABB"))
         }
         MaterialAlertDialogBuilder(requireContext())
             .setTitle("Guardar waypoint")
@@ -254,6 +485,7 @@ class MapFragment : Fragment() {
             .setPositiveButton("Guardar") { _, _ ->
                 val name = editText.text.toString().ifBlank { "WP ${System.currentTimeMillis() / 1000}" }
                 viewModel.saveWaypoint(name, point.latitude, point.longitude)
+                UmamiAnalytics.track(UmamiAnalytics.Event.WAYPOINT_SAVED)
                 Toast.makeText(context, "Waypoint '$name' guardado", Toast.LENGTH_SHORT).show()
                 addWaypointMarker(Waypoint(name = name, latitude = point.latitude, longitude = point.longitude))
             }
@@ -265,6 +497,8 @@ class MapFragment : Fragment() {
         val editText = TextInputEditText(requireContext()).apply {
             hint = "Nombre del punto de pesca"
             setPadding(48, 16, 48, 16)
+            setTextColor(android.graphics.Color.WHITE)
+            setHintTextColor(android.graphics.Color.parseColor("#88AABB"))
         }
         MaterialAlertDialogBuilder(requireContext())
             .setTitle("Guardar punto de pesca")
@@ -272,6 +506,7 @@ class MapFragment : Fragment() {
             .setPositiveButton("Guardar") { _, _ ->
                 val name = editText.text.toString().ifBlank { "Pesca ${System.currentTimeMillis() / 1000}" }
                 viewModel.saveFishingPoint(name, point.latitude, point.longitude)
+                UmamiAnalytics.track(UmamiAnalytics.Event.FISHING_POINT_SAVED)
                 Toast.makeText(context, "Punto de pesca '$name' guardado", Toast.LENGTH_SHORT).show()
                 addFishingMarker(FishingPoint(name = name, latitude = point.latitude, longitude = point.longitude))
             }
@@ -288,7 +523,7 @@ class MapFragment : Fragment() {
                 val radiusInput = view.findViewById<TextInputEditText>(R.id.etRadius)
                 val radius = radiusInput.text.toString().toDoubleOrNull() ?: 50.0
                 viewModel.activateAnchorAlarm(radius)
-                drawAnchorCircle(radius)
+                UmamiAnalytics.track(UmamiAnalytics.Event.ANCHOR_ALARM_ON)
                 Toast.makeText(context, "Alerta de fondeo activada (${radius.toInt()} m)", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Cancelar", null)
@@ -301,6 +536,7 @@ class MapFragment : Fragment() {
     private fun setupButtons() {
         // Centrar en posición
         binding.fabCenter.setOnClickListener {
+            if (!::mapView.isInitialized) return@setOnClickListener
             followLocation = true
             locationOverlay.enableFollowLocation()
             locationOverlay.myLocation?.let {
@@ -318,6 +554,7 @@ class MapFragment : Fragment() {
         binding.fabRecord.setOnClickListener {
             if (viewModel.isRecording.value) {
                 viewModel.stopRecording()
+                UmamiAnalytics.track(UmamiAnalytics.Event.TRACK_STOPPED)
                 binding.fabRecord.setImageResource(R.drawable.ic_record)
                 binding.recordingIndicator.isVisible = false
                 Toast.makeText(context, "Ruta guardada", Toast.LENGTH_SHORT).show()
@@ -330,6 +567,7 @@ class MapFragment : Fragment() {
         binding.btnAnchor.setOnClickListener {
             if (viewModel.anchorAlarmConfig.value?.isActive == true) {
                 viewModel.deactivateAnchorAlarm()
+                UmamiAnalytics.track(UmamiAnalytics.Event.ANCHOR_ALARM_OFF)
                 clearAnchorCircle()
                 binding.btnAnchor.setColorFilter(Color.WHITE)
                 Toast.makeText(context, "Alerta de fondeo desactivada", Toast.LENGTH_SHORT).show()
@@ -341,10 +579,12 @@ class MapFragment : Fragment() {
         // Parar navegación
         binding.btnStopNav.setOnClickListener {
             viewModel.stopNavigation()
-            destinationMarker?.let { mapView.overlays.remove(it) }
-            routeOverlay?.let { mapView.overlays.remove(it) }
+            if (::mapView.isInitialized) {
+                destinationMarker?.let { mapView.overlays.remove(it) }
+                routeOverlay?.let { mapView.overlays.remove(it) }
+                mapView.invalidate()
+            }
             binding.navigationPanel.isVisible = false
-            mapView.invalidate()
         }
     }
 
@@ -352,6 +592,8 @@ class MapFragment : Fragment() {
         val editText = TextInputEditText(requireContext()).apply {
             hint = "Nombre de la ruta (opcional)"
             setPadding(48, 16, 48, 16)
+            setTextColor(android.graphics.Color.WHITE)
+            setHintTextColor(android.graphics.Color.parseColor("#88AABB"))
         }
         MaterialAlertDialogBuilder(requireContext())
             .setTitle("Grabar ruta")
@@ -359,6 +601,7 @@ class MapFragment : Fragment() {
             .setPositiveButton("Iniciar") { _, _ ->
                 val name = editText.text.toString()
                 viewModel.startRecording(name)
+                UmamiAnalytics.track(UmamiAnalytics.Event.TRACK_STARTED)
                 binding.fabRecord.setImageResource(R.drawable.ic_stop)
                 binding.recordingIndicator.isVisible = true
             }
@@ -368,30 +611,22 @@ class MapFragment : Fragment() {
 
     private fun showLayersMenu() {
         val options = arrayOf(
-            "OpenStreetMap + Cartas náuticas ⚓",
-            "Satélite + Cartas náuticas"
+            "OpenSeaMap",
+            "Satélite"
         )
         MaterialAlertDialogBuilder(requireContext())
-            .setTitle("Capa base del mapa")
+            .setTitle("Capa del mapa")
             .setItems(options) { _, which ->
-                // Limpiar overlays actuales excepto los de marcadores
                 mapView.overlays.clear()
-                // Añadir rotación
-                val rot = org.osmdroid.views.overlay.gestures.RotationGestureOverlay(mapView)
+                val rot = RotationGestureOverlay(mapView)
                 rot.isEnabled = true
                 mapView.overlays.add(rot)
 
                 when (which) {
-                    0 -> mapView.setTileSource(TileSourceFactory.MAPNIK)
-                    1 -> mapView.setTileSource(
-                        XYTileSource("Satellite", 2, 20, 256, ".jpg",
-                            arrayOf("https://mt0.google.com/vt/lyrs=s&hl=en&"))
-                    )
+                    0 -> { mapView.setTileSource(TileSourceFactory.MAPNIK); addBathymetryAndHazardOverlays() }
+                    1 -> { mapView.setTileSource(createSatelliteSource()); addBathymetryAndHazardOverlays() }
                 }
-                // Volver a añadir capas náuticas y de posición
-                addNauticalChartOverlay()
-                mapView.overlays.add(locationOverlay)
-                mapView.invalidate()
+                restoreNonTileOverlays()
             }
             .show()
     }
@@ -413,13 +648,16 @@ class MapFragment : Fragment() {
             if (state.isNavigating && state.destination != null) {
                 binding.navigationPanel.isVisible = true
                 updateNavigationPanel(state)
+                binding.compassTapeView.setRouteBearing(state.bearingToDestDegrees)
             } else {
                 binding.navigationPanel.isVisible = false
+                binding.compassTapeView.setRouteBearing(null)
             }
         }
 
         // Ruta marina calculada por Brouter
         viewModel.marineRoutePoints.observe(viewLifecycleOwner) { points ->
+            if (!::mapView.isInitialized) return@observe
             if (points.isNotEmpty()) {
                 drawMarineRoute(points)
             }
@@ -427,6 +665,7 @@ class MapFragment : Fragment() {
 
         // Puntos de pesca
         viewModel.fishingPoints.observe(viewLifecycleOwner) { points ->
+            if (!::mapView.isInitialized) return@observe
             fishingMarkers.forEach { mapView.overlays.remove(it) }
             fishingMarkers.clear()
             points.forEach { addFishingMarker(it) }
@@ -435,15 +674,17 @@ class MapFragment : Fragment() {
 
         // Waypoints
         viewModel.waypoints.observe(viewLifecycleOwner) { wps ->
+            if (!::mapView.isInitialized) return@observe
             waypointMarkers.forEach { mapView.overlays.remove(it) }
             waypointMarkers.clear()
             wps.forEach { addWaypointMarker(it) }
             mapView.invalidate()
         }
 
-        // Track activo en el mapa
+        // Track activo en el mapa (en tiempo real durante grabación)
         viewModel.currentTrackPoints.observe(viewLifecycleOwner) { points ->
-            drawSavedRoute(points.map { GeoPoint(it.latitude, it.longitude) })
+            if (!::mapView.isInitialized) return@observe
+            drawLiveTrack(points.map { GeoPoint(it.latitude, it.longitude) })
         }
 
         // Estado grabación
@@ -456,6 +697,7 @@ class MapFragment : Fragment() {
 
         // Alerta de fondeo
         viewModel.anchorAlarmConfig.observe(viewLifecycleOwner) { cfg ->
+            if (!::mapView.isInitialized) return@observe
             if (cfg.isActive) {
                 binding.btnAnchor.setColorFilter(Color.RED)
                 drawAnchorCircle(cfg.radiusMeters, GeoPoint(cfg.centerLat, cfg.centerLon))
@@ -539,6 +781,20 @@ class MapFragment : Fragment() {
         mapView.invalidate()
     }
 
+    private fun drawLiveTrack(points: List<GeoPoint>) {
+        trackOverlay?.let { mapView.overlays.remove(it) }
+        trackOverlay = null
+        if (points.size < 2) { mapView.invalidate(); return }
+        trackOverlay = Polyline(mapView).apply {
+            setPoints(points)
+            outlinePaint.color = Color.parseColor("#00FF88")  // verde neón para distinguir de la ruta
+            outlinePaint.strokeWidth = 5f
+            outlinePaint.style = Paint.Style.STROKE
+        }
+        mapView.overlays.add(trackOverlay!!)
+        mapView.invalidate()
+    }
+
     private fun drawSavedRoute(points: List<GeoPoint>) {
         routeOverlay?.let { mapView.overlays.remove(it) }
         if (points.size < 2) return
@@ -554,11 +810,23 @@ class MapFragment : Fragment() {
         mapView.invalidate()
     }
 
+    private fun markerIcon(drawableRes: Int, tintColor: Int): BitmapDrawable {
+        val px = (44 * resources.displayMetrics.density).toInt()
+        val d = ContextCompat.getDrawable(requireContext(), drawableRes)!!.mutate()
+        DrawableCompat.setTint(d, tintColor)
+        val bmp = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bmp)
+        d.setBounds(0, 0, px, px)
+        d.draw(canvas)
+        return BitmapDrawable(resources, bmp)
+    }
+
     private fun addFishingMarker(point: FishingPoint) {
         val marker = Marker(mapView).apply {
             position = GeoPoint(point.latitude, point.longitude)
             title = point.name
             snippet = if (point.depth != null) "Prof: %.1f m\n%s".format(point.depth, point.notes) else point.notes
+            icon = markerIcon(R.drawable.ic_fishing, Color.parseColor("#00FF88"))
             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
         }
         fishingMarkers.add(marker)
@@ -571,6 +839,7 @@ class MapFragment : Fragment() {
             position = GeoPoint(wp.latitude, wp.longitude)
             title = wp.name
             snippet = wp.notes
+            icon = markerIcon(R.drawable.ic_waypoint, Color.parseColor("#00CFFF"))
             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
         }
         waypointMarkers.add(marker)
@@ -583,8 +852,8 @@ class MapFragment : Fragment() {
         val gps = viewModel.gpsData.value
         val c = center ?: if (gps.isValid) GeoPoint(gps.latitude, gps.longitude) else return
 
-        // Crear círculo poligonal aproximado
-        val circlePoints = mutableListOf<GeoPoint>()
+        // Construir puntos del círculo como GeoPoints
+        val circlePoints = ArrayList<GeoPoint>(73)
         for (i in 0..360 step 5) {
             val angle = Math.toRadians(i.toDouble())
             val dLat = (radiusMeters / 111320.0) * Math.cos(angle)
@@ -592,19 +861,32 @@ class MapFragment : Fragment() {
             circlePoints.add(GeoPoint(c.latitude + dLat, c.longitude + dLon))
         }
 
-        anchorCircle = Polygon(mapView).apply {
-            points = circlePoints
-            fillPaint.color = Color.argb(50, 255, 165, 0)
-            outlinePaint.color = Color.rgb(255, 165, 0)
-            outlinePaint.strokeWidth = 3f
+        // Usar Polyline (funcionamiento probado con las rutas de navegación)
+        val circleLine = Polyline(mapView).apply {
+            setPoints(circlePoints)
+            outlinePaint.color = Color.rgb(255, 40, 40)
+            outlinePaint.strokeWidth = 8f
+            outlinePaint.isAntiAlias = true
+            outlinePaint.style = Paint.Style.STROKE
         }
-        mapView.overlays.add(anchorCircle!!)
+        anchorCircleOverlay = circleLine
+        mapView.overlays.add(circleLine)
+
+        anchorMarkerOverlay = Marker(mapView).apply {
+            position = c
+            icon = markerIcon(R.drawable.ic_anchor, Color.parseColor("#FF4444"))
+            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+            title = "Fondeo (%.0f m)".format(radiusMeters)
+        }
+        mapView.overlays.add(anchorMarkerOverlay!!)
         mapView.invalidate()
     }
 
     private fun clearAnchorCircle() {
-        anchorCircle?.let { mapView.overlays.remove(it) }
-        anchorCircle = null
+        anchorCircleOverlay?.let { mapView.overlays.remove(it) }
+        anchorCircleOverlay = null
+        anchorMarkerOverlay?.let { mapView.overlays.remove(it) }
+        anchorMarkerOverlay = null
         mapView.invalidate()
     }
 
@@ -622,11 +904,15 @@ class MapFragment : Fragment() {
     override fun onResume() {
         super.onResume()
         if (::mapView.isInitialized) mapView.onResume()
+        rotationSensor?.let {
+            sensorManager?.registerListener(sensorListener, it, SensorManager.SENSOR_DELAY_UI)
+        }
     }
 
     override fun onPause() {
         super.onPause()
         if (::mapView.isInitialized) mapView.onPause()
+        sensorManager?.unregisterListener(sensorListener)
     }
 
     override fun onDestroyView() {
