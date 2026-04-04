@@ -1,0 +1,715 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0A1628">
+
+    <!-- Loading state -->
+    <LinearLayout
+        android:id="@+id/layoutLoading"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:visibility="gone">
+
+        <ProgressBar
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:indeterminateTint="#00BCD4" />
+
+        <TextView
+            android:id="@+id/tvLoadingMessage"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Cargando datos..."
+            android:textColor="#88AABB"
+            android:textSize="14sp"
+            android:layout_marginTop="12dp" />
+    </LinearLayout>
+
+    <!-- Error state -->
+    <LinearLayout
+        android:id="@+id/layoutError"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="32dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tvError"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#FF5722"
+            android:textSize="14sp"
+            android:gravity="center"
+            android:text="Error al cargar datos" />
+
+        <Button
+            android:id="@+id/btnRetry"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Reintentar"
+            android:layout_marginTop="16dp"
+            android:backgroundTint="#00BCD4"
+            android:textColor="#FFFFFF" />
+    </LinearLayout>
+
+    <!-- GPS waiting state -->
+    <LinearLayout
+        android:id="@+id/layoutGpsWaiting"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="32dp"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Esperando ubicación GPS..."
+            android:textColor="#88AABB"
+            android:textSize="16sp"
+            android:gravity="center" />
+    </LinearLayout>
+
+    <!-- Main content -->
+    <ScrollView
+        android:id="@+id/scrollContent"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="12dp">
+
+            <!-- Title -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="TIEMPO"
+                android:textColor="#00BCD4"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                android:padding="8dp"
+                android:letterSpacing="0.1" />
+
+            <!-- ═══════════════════ MAREA CARD ═══════════════════ -->
+            <androidx.cardview.widget.CardView
+                android:id="@+id/cardMarea"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                app:cardBackgroundColor="#0D2137"
+                app:cardCornerRadius="8dp"
+                app:cardElevation="4dp"
+                xmlns:app="http://schemas.android.com/apk/res-auto">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <!-- Section header -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="12dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="MAREA"
+                            android:textColor="#FFFFFF"
+                            android:textSize="16sp"
+                            android:textStyle="bold"
+                            android:letterSpacing="0.1" />
+
+                        <Button
+                            android:id="@+id/btnConfigureKey"
+                            android:layout_width="wrap_content"
+                            android:layout_height="32dp"
+                            android:text="Configurar clave"
+                            android:textSize="11sp"
+                            android:backgroundTint="#1A2E42"
+                            android:textColor="#88AABB"
+                            android:visibility="gone" />
+                    </LinearLayout>
+
+                    <!-- No WorldTides key panel -->
+                    <LinearLayout
+                        android:id="@+id/layoutNoKey"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="Introduce tu clave API de WorldTides (worldtides.info) para ver las mareas:"
+                            android:textColor="#88AABB"
+                            android:textSize="13sp"
+                            android:layout_marginBottom="8dp" />
+
+                        <EditText
+                            android:id="@+id/etApiKey"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:hint="Clave API WorldTides"
+                            android:textColor="#FFFFFF"
+                            android:textColorHint="#88AABB"
+                            android:backgroundTint="#1A3A52"
+                            android:textSize="13sp"
+                            android:padding="10dp"
+                            android:inputType="text"
+                            android:singleLine="true" />
+
+                        <Button
+                            android:id="@+id/btnSaveKey"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Guardar y cargar"
+                            android:layout_gravity="end"
+                            android:layout_marginTop="8dp"
+                            android:backgroundTint="#00BCD4"
+                            android:textColor="#FFFFFF"
+                            android:textSize="13sp" />
+                    </LinearLayout>
+
+                    <!-- Tide data -->
+                    <LinearLayout
+                        android:id="@+id/layoutTideData"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <!-- Current level row -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginBottom="12dp">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Nivel actual"
+                                    android:textColor="#88AABB"
+                                    android:textSize="12sp" />
+
+                                <TextView
+                                    android:id="@+id/tvCurrentTide"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="-- m"
+                                    android:textColor="#00BCD4"
+                                    android:textSize="28sp"
+                                    android:textStyle="bold" />
+                            </LinearLayout>
+
+                            <!-- Tide direction indicator -->
+                            <TextView
+                                android:id="@+id/tvTideDirection"
+                                android:layout_width="48dp"
+                                android:layout_height="48dp"
+                                android:gravity="center"
+                                android:textSize="28sp"
+                                android:text="↑" />
+                        </LinearLayout>
+
+                        <!-- Next tides -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal">
+
+                            <!-- Next high tide -->
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical"
+                                android:background="#0A1E30"
+                                android:padding="10dp"
+                                android:layout_marginEnd="6dp">
+
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="horizontal"
+                                    android:gravity="center_vertical">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="▲ "
+                                        android:textColor="#4CAF50"
+                                        android:textSize="14sp" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="PLEAMAR"
+                                        android:textColor="#4CAF50"
+                                        android:textSize="11sp"
+                                        android:textStyle="bold"
+                                        android:letterSpacing="0.1" />
+                                </LinearLayout>
+
+                                <TextView
+                                    android:id="@+id/tvNextHighTime"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="--:--"
+                                    android:textColor="#FFFFFF"
+                                    android:textSize="18sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvNextHighHeight"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="-- m"
+                                    android:textColor="#88AABB"
+                                    android:textSize="13sp" />
+                            </LinearLayout>
+
+                            <!-- Next low tide -->
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical"
+                                android:background="#0A1E30"
+                                android:padding="10dp"
+                                android:layout_marginStart="6dp">
+
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="horizontal"
+                                    android:gravity="center_vertical">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="▼ "
+                                        android:textColor="#2196F3"
+                                        android:textSize="14sp" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="BAJAMAR"
+                                        android:textColor="#2196F3"
+                                        android:textSize="11sp"
+                                        android:textStyle="bold"
+                                        android:letterSpacing="0.1" />
+                                </LinearLayout>
+
+                                <TextView
+                                    android:id="@+id/tvNextLowTime"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="--:--"
+                                    android:textColor="#FFFFFF"
+                                    android:textSize="18sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvNextLowHeight"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="-- m"
+                                    android:textColor="#88AABB"
+                                    android:textSize="13sp" />
+                            </LinearLayout>
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <!-- Tide loading -->
+                    <LinearLayout
+                        android:id="@+id/layoutTideLoading"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center"
+                        android:padding="16dp"
+                        android:visibility="gone">
+
+                        <ProgressBar
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:indeterminateTint="#00BCD4" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="  Cargando mareas..."
+                            android:textColor="#88AABB"
+                            android:textSize="13sp" />
+                    </LinearLayout>
+
+                    <!-- Tide error -->
+                    <TextView
+                        android:id="@+id/tvTideError"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="#FF5722"
+                        android:textSize="12sp"
+                        android:visibility="gone"
+                        android:padding="8dp" />
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- ═══════════════════ PARTE DE MAR CARD ═══════════════════ -->
+            <androidx.cardview.widget.CardView
+                android:id="@+id/cardMarineWeather"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                app:cardBackgroundColor="#0D2137"
+                app:cardCornerRadius="8dp"
+                app:cardElevation="4dp"
+                xmlns:app="http://schemas.android.com/apk/res-auto">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="PARTE DE MAR"
+                        android:textColor="#FFFFFF"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:letterSpacing="0.1"
+                        android:layout_marginBottom="12dp" />
+
+                    <!-- Marine loading -->
+                    <LinearLayout
+                        android:id="@+id/layoutMarineLoading"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center"
+                        android:padding="16dp"
+                        android:visibility="visible">
+
+                        <ProgressBar
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:indeterminateTint="#00BCD4" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="  Cargando parte de mar..."
+                            android:textColor="#88AABB"
+                            android:textSize="13sp" />
+                    </LinearLayout>
+
+                    <!-- Marine error -->
+                    <TextView
+                        android:id="@+id/tvMarineError"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="#FF5722"
+                        android:textSize="12sp"
+                        android:visibility="gone"
+                        android:padding="8dp" />
+
+                    <!-- Marine data -->
+                    <LinearLayout
+                        android:id="@+id/layoutMarineData"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <!-- Waves row -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:layout_marginBottom="8dp">
+
+                            <!-- Wave height -->
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical"
+                                android:background="#0A1E30"
+                                android:padding="10dp"
+                                android:layout_marginEnd="4dp">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Altura ola"
+                                    android:textColor="#88AABB"
+                                    android:textSize="11sp" />
+
+                                <TextView
+                                    android:id="@+id/tvWaveHeight"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="-- m"
+                                    android:textColor="#00BCD4"
+                                    android:textSize="20sp"
+                                    android:textStyle="bold" />
+                            </LinearLayout>
+
+                            <!-- Wave period -->
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical"
+                                android:background="#0A1E30"
+                                android:padding="10dp"
+                                android:layout_marginStart="4dp"
+                                android:layout_marginEnd="4dp">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Periodo"
+                                    android:textColor="#88AABB"
+                                    android:textSize="11sp" />
+
+                                <TextView
+                                    android:id="@+id/tvWavePeriod"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="-- s"
+                                    android:textColor="#00BCD4"
+                                    android:textSize="20sp"
+                                    android:textStyle="bold" />
+                            </LinearLayout>
+
+                            <!-- Wave direction -->
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical"
+                                android:background="#0A1E30"
+                                android:padding="10dp"
+                                android:layout_marginStart="4dp">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Dirección ola"
+                                    android:textColor="#88AABB"
+                                    android:textSize="11sp" />
+
+                                <TextView
+                                    android:id="@+id/tvWaveDirection"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="--"
+                                    android:textColor="#00BCD4"
+                                    android:textSize="20sp"
+                                    android:textStyle="bold" />
+                            </LinearLayout>
+                        </LinearLayout>
+
+                        <!-- Swell row -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:layout_marginBottom="16dp">
+
+                            <!-- Swell height -->
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical"
+                                android:background="#0A1E30"
+                                android:padding="10dp"
+                                android:layout_marginEnd="4dp">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Mar de fondo"
+                                    android:textColor="#88AABB"
+                                    android:textSize="11sp" />
+
+                                <TextView
+                                    android:id="@+id/tvSwellHeight"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="-- m"
+                                    android:textColor="#00BCD4"
+                                    android:textSize="20sp"
+                                    android:textStyle="bold" />
+                            </LinearLayout>
+
+                            <!-- Swell period -->
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical"
+                                android:background="#0A1E30"
+                                android:padding="10dp"
+                                android:layout_marginStart="4dp"
+                                android:layout_marginEnd="4dp">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Periodo fondo"
+                                    android:textColor="#88AABB"
+                                    android:textSize="11sp" />
+
+                                <TextView
+                                    android:id="@+id/tvSwellPeriod"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="-- s"
+                                    android:textColor="#00BCD4"
+                                    android:textSize="20sp"
+                                    android:textStyle="bold" />
+                            </LinearLayout>
+
+                            <!-- Swell direction -->
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical"
+                                android:background="#0A1E30"
+                                android:padding="10dp"
+                                android:layout_marginStart="4dp">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Dir. fondo"
+                                    android:textColor="#88AABB"
+                                    android:textSize="11sp" />
+
+                                <TextView
+                                    android:id="@+id/tvSwellDirection"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="--"
+                                    android:textColor="#00BCD4"
+                                    android:textSize="20sp"
+                                    android:textStyle="bold" />
+                            </LinearLayout>
+                        </LinearLayout>
+
+                        <!-- Hourly forecast table header -->
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="PRÓXIMAS 12 HORAS"
+                            android:textColor="#88AABB"
+                            android:textSize="12sp"
+                            android:textStyle="bold"
+                            android:letterSpacing="0.1"
+                            android:layout_marginBottom="8dp" />
+
+                        <!-- Table header row -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:layout_marginBottom="4dp">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Hora"
+                                android:textColor="#88AABB"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Ola"
+                                android:textColor="#88AABB"
+                                android:textSize="11sp"
+                                android:textStyle="bold"
+                                android:gravity="center" />
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Fondo"
+                                android:textColor="#88AABB"
+                                android:textSize="11sp"
+                                android:textStyle="bold"
+                                android:gravity="center" />
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Dir."
+                                android:textColor="#88AABB"
+                                android:textSize="11sp"
+                                android:textStyle="bold"
+                                android:gravity="end" />
+                        </LinearLayout>
+
+                        <!-- Hourly rows container -->
+                        <LinearLayout
+                            android:id="@+id/layoutHourlyRows"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical" />
+                    </LinearLayout>
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- Last updated timestamp -->
+            <TextView
+                android:id="@+id/tvLastUpdated"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#88AABB"
+                android:textSize="11sp"
+                android:gravity="center"
+                android:padding="8dp"
+                android:visibility="gone" />
+
+        </LinearLayout>
+    </ScrollView>
+
+</FrameLayout>
